@@ -289,3 +289,44 @@ class ErrorResponse(BaseModel):
     error: str = Field(..., description="Error message")
     error_code: str = Field(..., description="Error code for debugging")
     details: Optional[Dict[str, Any]] = Field(None, description="Additional error details")
+
+
+class JobSubmitResponse(BaseModel):
+    success: bool = Field(default=True)
+    job_id: str
+    status: str
+    message: str
+    estimated_time_seconds: int = 30
+
+
+class JobStatusResponse(BaseModel):
+    success: bool = Field(default=True)
+    job_id: str
+    status: str
+    progress: int
+    created_at: str
+    updated_at: str
+    error: Optional[str] = None
+
+
+class JobResultResponse(BaseModel):
+    success: bool
+    data: Optional[MarksheetExtraction] = None
+    filename: str
+    extraction_method: str
+    cost_estimate_usd: float
+    error: Optional[str] = None
+
+
+class BatchJobInfo(BaseModel):
+    filename: str
+    job_id: str
+    status: str
+
+
+class BatchSubmitResponse(BaseModel):
+    success: bool = Field(default=True)
+    batch_id: str
+    total_files: int
+    jobs: List[BatchJobInfo]
+    message: str

@@ -44,6 +44,20 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO")
     log_file: str = Field(default="logs/app.log")
     
+    redis_url: str = Field(default="redis://localhost:6379/0")
+    celery_enabled: bool = Field(default=False)
+    
+    # MongoDB Settings
+    mongodb_url: str = Field(default="mongodb://localhost:27017")
+    mongodb_db_name: str = Field(default="marksheet_extraction")
+    mongodb_enabled: bool = Field(default=False)
+    
+    # JWT Authentication
+    jwt_secret_key: str = Field(default="your-secret-key-change-in-production")
+    jwt_algorithm: str = Field(default="HS256")
+    jwt_access_token_expire_minutes: int = Field(default=30)
+    jwt_refresh_token_expire_days: int = Field(default=7)
+    
     @property
     def max_file_size_bytes(self) -> int:
         return self.max_file_size_mb * 1024 * 1024

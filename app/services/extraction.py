@@ -88,11 +88,13 @@ class BaseLLMExtractor(ABC):
                         weights.append(weight)
                 else:
                     for key, value in obj.items():
-                        # Higher weight for important fields
                         field_weight = weight
-                        if key in ["name", "roll_number", "result_status"]:
+                        # critical fields for grading (60% weight)
+                        if key in ["name", "roll_number", "registration_number", "result_status"]:
+                            field_weight = 3.0
+                        elif key in ["obtained_marks", "max_marks", "total_marks", "subject_name", "exam_name"]:
                             field_weight = 2.0
-                        elif key in ["obtained_marks", "total_marks"]:
+                        elif key in ["board_university", "grade", "percentage"]:
                             field_weight = 1.5
                         extract_confidences(value, field_weight)
             elif isinstance(obj, list):
@@ -106,8 +108,16 @@ class BaseLLMExtractor(ABC):
         
         weighted_sum = sum(c * w for c, w in zip(confidences, weights))
         total_weight = sum(weights)
+        overall = weighted_sum / total_weight if total_weight > 0 else 0.5
         
-        return round(weighted_sum / total_weight, 3) if total_weight > 0 else 0.5
+        # penalty for missing critical data
+        candidate = data.get("candidate", {})
+        if not candidate.get("name") or not candidate.get("roll_number"):
+            overall *= 0.85
+        if not data.get("subjects") or len(data.get("subjects", [])) == 0:
+            overall *= 0.7
+            
+        return round(min(1.0, max(0.0, overall)), 3)
 
 
 

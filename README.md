@@ -286,7 +286,9 @@ OCR_USE_PARALLEL=true  # Set to false if ThreadPoolExecutor not supported
 ### 4. Run the server
 
 ```bash
-python -m uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+celery run
+celery -A app.core.celery_config worker --loglevel=info --concurrency=1
 ```
 
 ### 5. Open in browser locally
