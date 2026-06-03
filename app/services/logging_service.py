@@ -13,10 +13,8 @@ from app.models.user_schemas import (
 
 
 class LoggingService:
-    """Handle MongoDB logging operations"""
     
     async def create_extraction_log(self, log_data: ExtractionLogCreate) -> str:
-        """Create extraction log entry"""
         if not mongodb.db:
             return ""
         

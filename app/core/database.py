@@ -1,6 +1,4 @@
-"""
-MongoDB database connection and collections
-"""
+
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import IndexModel, ASCENDING, DESCENDING
 from typing import Optional
@@ -10,8 +8,6 @@ from app.core.config import settings
 
 
 class MongoDB:
-    """MongoDB connection manager"""
-    
     client: Optional[AsyncIOMotorClient] = None
     db: Optional[AsyncIOMotorDatabase] = None
     
@@ -49,14 +45,14 @@ class MongoDB:
             return
         
         try:
-            # Users collection indexes
+            # usrs collection indexes
             await self.db.users.create_indexes([
                 IndexModel([("email", ASCENDING)], unique=True),
                 IndexModel([("api_key", ASCENDING)], unique=True, sparse=True),
                 IndexModel([("created_at", DESCENDING)])
             ])
             
-            # Extraction logs collection indexes
+            # extcion logs collection indexes
             await self.db.extraction_logs.create_indexes([
                 IndexModel([("user_id", ASCENDING), ("created_at", DESCENDING)]),
                 IndexModel([("job_id", ASCENDING)], unique=True, sparse=True),
@@ -64,14 +60,14 @@ class MongoDB:
                 IndexModel([("created_at", DESCENDING)])
             ])
             
-            # User activity collection indexes
+            # user activity collection indexes
             await self.db.user_activity.create_indexes([
                 IndexModel([("user_id", ASCENDING), ("timestamp", DESCENDING)]),
                 IndexModel([("action", ASCENDING)]),
                 IndexModel([("timestamp", DESCENDING)])
             ])
             
-            # API usage collection indexes
+            # api usage collection indexes
             await self.db.api_usage.create_indexes([
                 IndexModel([("user_id", ASCENDING), ("date", DESCENDING)]),
                 IndexModel([("date", DESCENDING)])

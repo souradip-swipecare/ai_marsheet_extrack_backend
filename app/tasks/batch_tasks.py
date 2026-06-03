@@ -5,7 +5,6 @@ from app.core.celery_config import celery_app
 
 @celery_app.task(name="check_batch_status")
 def check_batch_status(job_ids: List[str]) -> Dict:
-    """check status of multiple jobs in a batch"""
     
     results = []
     completed = 0

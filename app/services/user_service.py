@@ -1,6 +1,4 @@
-"""
-User management service with MongoDB
-"""
+
 from datetime import datetime
 from typing import Optional, Dict, Any
 from bson import ObjectId
@@ -12,10 +10,8 @@ from app.models.user_schemas import UserRegister
 
 
 class UserService:
-    """Handle user operations"""
     
     async def create_user(self, user_data: UserRegister) -> Dict[str, Any]:
-        """Create a new user"""
         users_collection = mongodb.get_collection("users")
         
         # Check if email already exists
@@ -45,7 +41,6 @@ class UserService:
         return user_doc
     
     async def authenticate_user(self, email: str, password: str) -> Optional[Dict[str, Any]]:
-        """Authenticate user with email and password"""
         users_collection = mongodb.get_collection("users")
         
         user = await users_collection.find_one({"email": email})
@@ -69,7 +64,6 @@ class UserService:
         return user
     
     async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Get user by ID"""
         users_collection = mongodb.get_collection("users")
         
         try:
@@ -80,14 +74,12 @@ class UserService:
             return None
     
     async def get_user_by_api_key(self, api_key: str) -> Optional[Dict[str, Any]]:
-        """Get user by API key"""
         users_collection = mongodb.get_collection("users")
         
         user = await users_collection.find_one({"api_key": api_key, "is_active": True})
         return user
     
     async def increment_extraction_count(self, user_id: str):
-        """Increment user's total extraction count"""
         users_collection = mongodb.get_collection("users")
         
         try:

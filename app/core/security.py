@@ -1,6 +1,4 @@
-"""
-JWT authentication and password hashing utilities
-"""
+
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
@@ -19,17 +17,14 @@ security = HTTPBearer()
 
 
 def hash_password(password: str) -> str:
-    """Hash a password"""
     return pwd_context.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against a hash"""
     return pwd_context.verify(plain_password, hashed_password)
 
 
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
-    """Create JWT access token"""
     to_encode = data.copy()
     
     if expires_delta:
@@ -49,7 +44,6 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
 
 
 def create_refresh_token(data: Dict[str, Any]) -> str:
-    """Create JWT refresh token"""
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=settings.jwt_refresh_token_expire_days)
     
@@ -65,7 +59,6 @@ def create_refresh_token(data: Dict[str, Any]) -> str:
 
 
 def decode_token(token: str) -> Dict[str, Any]:
-    """Decode and verify JWT token"""
     try:
         payload = jwt.decode(
             token,
@@ -80,16 +73,14 @@ def decode_token(token: str) -> Dict[str, Any]:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-
+# radmon key geerate to store in database with the users
 def generate_api_key() -> str:
-    """Generate a random API key"""
     return f"mk_{secrets.token_urlsafe(32)}"
 
 
 async def get_current_user_from_token(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> Dict[str, Any]:
-    """Dependency to get current user from JWT token"""
     token = credentials.credentials
     payload = decode_token(token)
     
@@ -119,7 +110,6 @@ async def get_current_user_from_token(
 async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))
 ) -> Optional[Dict[str, Any]]:
-    """Dependency to get current user if token provided, otherwise None"""
     if credentials is None:
         return None
     

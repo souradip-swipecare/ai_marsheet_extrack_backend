@@ -5,7 +5,6 @@ from loguru import logger
 
 
 class ImageQualityAnalyzer:
-    """assess image quality to route between OCR and Vision API"""
     
     BLUR_THRESHOLD = 100.0
     CONTRAST_THRESHOLD = 35
@@ -13,14 +12,7 @@ class ImageQualityAnalyzer:
     QUALITY_SCORE_FOR_OCR = 65
     
     def assess_quality(self, image_bytes: bytes) -> Dict:
-        """
-        analyze image quality and recommend processing path
-        
-        returns:
-            quality_score: 0-100
-            recommended_path: 'ocr' or 'vision'
-            blur_score, contrast_score, resolution_score
-        """
+
         try:
             img_array = np.frombuffer(image_bytes, np.uint8)
             image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
@@ -70,7 +62,6 @@ class ImageQualityAnalyzer:
             return max(0, (laplacian_var / self.BLUR_THRESHOLD) * 50)
     
     def _assess_contrast(self, gray: np.ndarray) -> float:
-        """standard deviation for contrast"""
         std_dev = np.std(gray)
         
         if std_dev >= self.CONTRAST_THRESHOLD * 2:
@@ -79,7 +70,6 @@ class ImageQualityAnalyzer:
             return min(100, (std_dev / self.CONTRAST_THRESHOLD) * 50)
     
     def _assess_resolution(self, height: int, width: int) -> float:
-        """check if resolution is adequate"""
         min_dim = min(height, width)
         
         if min_dim >= self.RESOLUTION_THRESHOLD * 2:

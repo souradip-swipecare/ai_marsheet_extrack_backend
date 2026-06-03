@@ -1,7 +1,4 @@
-"""
-Centralized middleware module for the application
-Follows MVC architecture - all middleware logic in one place
-"""
+
 from typing import Optional, Dict, Any
 from fastapi import Request
 from jose import JWTError, jwt
@@ -11,17 +8,7 @@ from app.core.config import settings
 
 
 def decode_jwt_token(token: str) -> Optional[Dict[str, Any]]:
-    """
-    Decode and validate JWT token
-    Returns user data if valid, None if invalid
-    
-    Args:
-        token: JWT token string
-        
-    Returns:
-        Dict with user_id, email, role if valid
-        None if invalid
-    """
+   
     try:
         payload = jwt.decode(
             token,
@@ -56,21 +43,6 @@ async def jwt_auth_middleware(request: Request) -> None:
     """
     JWT Authentication Middleware
     
-    Extracts JWT token from Authorization header,
-    validates it, and adds user info to request.state.user
-    
-    This is OPTIONAL authentication - requests are not blocked
-    if token is missing or invalid. The request.state.user will
-    be None for unauthenticated requests.
-    
-    Usage in routes:
-        current_user = getattr(request.state, "user", None)
-        if current_user:
-            user_id = current_user["user_id"]
-            # Log to MongoDB, track usage, etc.
-    
-    Args:
-        request: FastAPI Request object
     """
     # Initialize user as None (unauthenticated by default)
     request.state.user = None
@@ -108,12 +80,9 @@ async def jwt_auth_middleware(request: Request) -> None:
 
 async def log_user_activity_middleware(request: Request) -> None:
     """
-    Log user activity to MongoDB if user is authenticated
+    Log user activity to mongodb if user is authenticated
     
-    This runs AFTER jwt_auth_middleware has populated request.state.user
-    
-    Args:
-        request: FastAPI Request object
+   
     """
     # Skip if MongoDB not enabled
     if not settings.mongodb_enabled:

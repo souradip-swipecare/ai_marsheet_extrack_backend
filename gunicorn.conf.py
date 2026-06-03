@@ -1,7 +1,4 @@
-"""
-Production deployment configuration for concurrent request handling
-Optimized for 2-core, 4GB RAM system with async FastAPI
-"""
+
 
 # Gunicorn configuration
 # https://docs.gunicorn.org/en/stable/settings.html
@@ -24,7 +21,6 @@ timeout = 120  # Workers timeout after 2 minutes
 graceful_timeout = 30  # Graceful shutdown timeout
 keepalive = 5  # Keep-alive connections
 
-# Logging
 accesslog = "-"  # Log to stdout
 errorlog = "-"  # Log to stderr
 loglevel = "info"

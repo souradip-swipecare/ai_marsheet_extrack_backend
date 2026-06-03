@@ -21,7 +21,6 @@ class CallbackTask(Task):
 
 @celery_app.task(bind=True, base=CallbackTask, name="extract_marksheet_task")
 def extract_marksheet_task(self, file_data: bytes, filename: str, user_api_key: str = None) -> Dict[str, Any]:
-    """celery task for async marksheet extraction"""
     
     try:
         self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Starting extraction'})

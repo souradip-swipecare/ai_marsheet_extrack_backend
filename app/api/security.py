@@ -81,11 +81,7 @@ def decode_jwt_token(token: str) -> Optional[Dict[str, Any]]:
 
 
 async def jwt_auth_middleware(request: Request) -> None:
-    """
-    Middleware to extract and validate JWT token from request
-    Adds user info to request.state.user if token is valid
-    Does not block request if token is missing/invalid (optional auth)
-    """
+  
     # Initialize user as None
     request.state.user = None
     

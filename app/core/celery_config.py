@@ -22,20 +22,20 @@ celery_app.conf.update(
     
     # Task execution
     task_track_started=True,
-    task_time_limit=300,  # Hard limit: 5 minutes
-    task_soft_time_limit=240,  # Soft limit: 4 minutes
-    task_acks_late=True,  # Acknowledge after task completion (reliability)
-    task_reject_on_worker_lost=True,  # Requeue if worker crashes
+    task_time_limit=300,  # hard limit: 5 minutes
+    task_soft_time_limit=240,  # soft limit: 4 minutes
+    task_acks_late=True,  # acknowledge after task completion (reliability)
+    task_reject_on_worker_lost=True,  # requeue if worker crashes
     
     # Worker
-    worker_prefetch_multiplier=1,  # Only fetch 1 task at a time (fair distribution)
-    worker_max_tasks_per_child=50,  # Restart worker after 50 tasks (prevent memory leaks)
+    worker_prefetch_multiplier=1,  # only fetch 1 task at a time (fair distribution)
+    worker_max_tasks_per_child=50,  # restart worker after 50 tasks (prevent memory leaks)
     worker_disable_rate_limits=False,
-    worker_send_task_events=True,  # Enable monitoring
+    worker_send_task_events=True,  # enable monitoring
     
     # Results
-    result_expires=3600,  # Results expire after 1 hour
-    result_extended=True,  # Store task args/kwargs in result
+    result_expires=3600,  # results expire after 1 hour
+    result_extended=True,  # store task args/kwargs in result
     result_backend_transport_options={
         "master_name": "mymaster",
         "socket_keepalive": True,
