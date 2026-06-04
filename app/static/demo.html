@@ -228,12 +228,54 @@
                                 <i class="fas fa-cloud-upload-alt text-primary me-2"></i>Upload Marksheet
                             </h5>
                             
-                            <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-                                <i class="fas fa-file-upload"></i>
-                                <h5>Drop file here or click to browse</h5>
-                                <p class="text-muted mb-0">Supports JPG, PNG, PDF (Max 10MB)</p>
-                                <input type="file" id="fileInput" class="d-none" 
-                                       accept=".jpg,.jpeg,.png,.pdf" onchange="handleFileSelect(event)">
+                            <ul class="nav nav-pills mb-3" role="tablist">
+                                <li class="nav-item">
+                                    <a class="nav-link active" data-bs-toggle="pill" href="#singleUpload">
+                                        <i class="fas fa-file me-1"></i>Single File
+                                    </a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" data-bs-toggle="pill" href="#batchUpload">
+                                        <i class="fas fa-layer-group me-1"></i>Batch Upload
+                                    </a>
+                                </li>
+                            </ul>
+
+                            <div class="tab-content">
+                                <!-- Single File Upload -->
+                                <div id="singleUpload" class="tab-pane fade show active">
+                                    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                                        <i class="fas fa-file-upload"></i>
+                                        <h5>Drop file here or click to browse</h5>
+                                        <p class="text-muted mb-0">Supports JPG, PNG, PDF (Max 10MB)</p>
+                                        <input type="file" id="fileInput" class="d-none" 
+                                               accept=".jpg,.jpeg,.png,.pdf" onchange="handleFileSelect(event)">
+                                    </div>
+                                </div>
+
+                                <!-- Batch Upload -->
+                                <div id="batchUpload" class="tab-pane fade">
+                                    <div class="upload-zone" id="batchUploadZone" onclick="document.getElementById('batchFileInput').click()">
+                                        <i class="fas fa-layer-group"></i>
+                                        <h5>Drop multiple files or click to browse</h5>
+                                        <p class="text-muted mb-0">Max 10 files, 10MB each</p>
+                                        <input type="file" id="batchFileInput" class="d-none" 
+                                               accept=".jpg,.jpeg,.png,.pdf" multiple onchange="handleBatchFileSelect(event)">
+                                    </div>
+                                    
+                                    <div id="selectedBatchFiles" class="mt-3 hidden">
+                                        <div class="alert alert-info">
+                                            <strong><i class="fas fa-layer-group me-2"></i><span id="batchFileCount">0</span> files selected</strong>
+                                        </div>
+                                        <div id="batchFileList" class="mb-3" style="max-height: 200px; overflow-y: auto;"></div>
+                                        <button class="btn btn-success w-100" onclick="extractBatch()">
+                                            <i class="fas fa-rocket me-2"></i>Extract All Files
+                                        </button>
+                                        <button class="btn btn-outline-secondary w-100 mt-2" onclick="clearBatchFiles()">
+                                            <i class="fas fa-times me-2"></i>Clear All
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                             
                             <div class="text-center mt-3">
@@ -364,20 +406,26 @@
         // Drag and Drop
         function setupDragAndDrop() {
             const zone = document.getElementById('uploadZone');
+            const batchZone = document.getElementById('batchUploadZone');
             
-            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                zone.addEventListener(eventName, preventDefaults, false);
-            });
-            
-            ['dragenter', 'dragover'].forEach(eventName => {
-                zone.addEventListener(eventName, () => zone.classList.add('dragover'));
-            });
-            
-            ['dragleave', 'drop'].forEach(eventName => {
-                zone.addEventListener(eventName, () => zone.classList.remove('dragover'));
+            [zone, batchZone].forEach(dropZone => {
+                if (!dropZone) return;
+                
+                ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                    dropZone.addEventListener(eventName, preventDefaults, false);
+                });
+                
+                ['dragenter', 'dragover'].forEach(eventName => {
+                    dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'));
+                });
+                
+                ['dragleave', 'drop'].forEach(eventName => {
+                    dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'));
+                });
             });
             
             zone.addEventListener('drop', handleDrop);
+            batchZone.addEventListener('drop', handleBatchDrop);
         }
 
         function preventDefaults(e) {
@@ -649,6 +697,15 @@
         async function extractAsync() {
             if (!selectedFile) return;
             
+            // Show loading state
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            
+            progressContainer.classList.add('active');
+            progressBar.style.width = '50%';
+            progressText.textContent = 'Submitting job...';
+            
             const formData = new FormData();
             formData.append('file', selectedFile);
             
@@ -662,13 +719,20 @@
                 const data = await response.json();
                 
                 if (response.ok) {
-                    addJob(data.job_id, selectedFile.name);
-                    clearFile();
-                    startJobPolling(data.job_id);
+                    progressBar.style.width = '100%';
+                    progressText.textContent = 'Job submitted!';
+                    
+                    setTimeout(() => {
+                        progressContainer.classList.remove('active');
+                        addJob(data.job_id, selectedFile.name);
+                        clearFile();
+                        startJobPolling(data.job_id);
+                    }, 500);
                 } else {
                     throw new Error(data.detail || 'Job submission failed');
                 }
             } catch (error) {
+                progressContainer.classList.remove('active');
                 alert('Error: ' + error.message);
             }
         }
@@ -706,18 +770,23 @@
             let html = '';
             activeJobs.forEach(job => {
                 const statusClass = `status-${job.status}`;
+                const statusMsg = job.statusMessage || job.status;
                 html += `
                     <div class="job-card">
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <strong class="text-truncate" style="max-width: 200px;">${job.filename}</strong>
                             <span class="status-badge ${statusClass}">${job.status}</span>
                         </div>
-                        <div class="progress" style="height: 5px;">
-                            <div class="progress-bar" style="width: ${job.progress}%"></div>
+                        <div class="progress mb-2" style="height: 8px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 style="width: ${job.progress}%"></div>
                         </div>
+                        <small class="text-muted d-block mb-2">
+                            <i class="fas fa-info-circle me-1"></i>${statusMsg}
+                        </small>
                         <div class="mt-2">
                             <button class="btn btn-sm btn-outline-primary" onclick="checkJobStatus('${job.id}')">
-                                <i class="fas fa-sync-alt"></i> Check
+                                <i class="fas fa-sync-alt"></i> Refresh
                             </button>
                             ${job.status === 'completed' ? 
                                 `<button class="btn btn-sm btn-success" onclick="getJobResult('${job.id}')">
@@ -748,17 +817,30 @@
 
         async function checkJobStatus(jobId) {
             try {
-                const response = await fetch(`${API_BASE}/api/v1/job/${jobId}/status`);
+                const response = await fetch(`${API_BASE}/api/v1/job/${jobId}/status`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
                 const data = await response.json();
                 
                 if (response.ok) {
+                    const job = activeJobs.get(jobId);
+                    const wasProcessing = job && job.status === 'processing';
+                    
                     updateJob(jobId, {
                         status: data.status,
-                        progress: data.progress
+                        progress: data.progress,
+                        statusMessage: data.status_message || data.status
                     });
                     
-                    if (data.status === 'completed') {
+                    // Show notification when job completes
+                    if (data.status === 'completed' && wasProcessing) {
+                        showMessage('authMessage', 'success', `✓ Job completed: ${job.filename}`);
                         loadUserStats();
+                        
+                        // Auto-fetch result
+                        setTimeout(() => getJobResult(jobId), 500);
+                    } else if (data.status === 'failed') {
+                        showMessage('authMessage', 'danger', `✗ Job failed: ${data.error || 'Unknown error'}`);
                     }
                 }
             } catch (error) {
@@ -768,7 +850,9 @@
 
         async function getJobResult(jobId) {
             try {
-                const response = await fetch(`${API_BASE}/api/v1/job/${jobId}/result`);
+                const response = await fetch(`${API_BASE}/api/v1/job/${jobId}/result`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
                 const data = await response.json();
                 
                 if (response.ok) {
@@ -797,61 +881,187 @@
                 return;
             }
             
+            // Overall confidence and stats
             let html = `
                 <div class="mb-3">
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <span class="text-muted small">Overall Confidence</span>
-                        ${getConfidenceBadge(extractedData.overall_confidence)}
+                        ${getConfidenceBadge(extractedData.extraction_confidence)}
                     </div>
                     <small class="text-muted">
                         Method: <strong>${data.extraction_method || 'N/A'}</strong> | 
-                        Time: <strong>${data.processing_time_ms || 0}ms</strong>
+                        Cost: <strong>$${data.cost_estimate_usd || 0}</strong>
                     </small>
                 </div>
             `;
             
-            // Display key fields
-            const fields = [
-                { key: 'student_name', label: 'Student Name' },
-                { key: 'roll_number', label: 'Roll Number' },
-                { key: 'class_grade', label: 'Class/Grade' },
-                { key: 'percentage', label: 'Percentage' },
-                { key: 'result_status', label: 'Result' }
-            ];
+            // Candidate Info
+            if (extractedData.candidate) {
+                html += '<div class="mt-3"><strong><i class="fas fa-user me-2"></i>Candidate</strong></div>';
+                
+                const candidateFields = [
+                    { key: 'name', label: 'Name' },
+                    { key: 'father_name', label: 'Father Name' },
+                    { key: 'mother_name', label: 'Mother Name' },
+                    { key: 'roll_number', label: 'Roll Number' },
+                    { key: 'registration_number', label: 'Registration' }
+                ];
+                
+                candidateFields.forEach(field => {
+                    const data = extractedData.candidate[field.key];
+                    if (data && data.value) {
+                        html += `
+                            <div class="result-field">
+                                <div class="d-flex justify-content-between">
+                                    <small class="text-muted">${field.label}</small>
+                                    ${getConfidenceBadge(data.confidence)}
+                                </div>
+                                <strong>${data.value}</strong>
+                            </div>
+                        `;
+                    }
+                });
+            }
             
-            fields.forEach(field => {
-                if (extractedData[field.key]) {
-                    const value = extractedData[field.key].value || extractedData[field.key];
-                    const confidence = extractedData[field.key].confidence;
+            // Examination Info
+            if (extractedData.examination) {
+                html += '<div class="mt-3"><strong><i class="fas fa-graduation-cap me-2"></i>Examination</strong></div>';
+                
+                const examFields = [
+                    { key: 'board_university', label: 'Board/University' },
+                    { key: 'exam_name', label: 'Exam Name' },
+                    { key: 'exam_year', label: 'Year' },
+                    { key: 'institution_name', label: 'Institution' }
+                ];
+                
+                examFields.forEach(field => {
+                    const data = extractedData.examination[field.key];
+                    if (data && data.value) {
+                        html += `
+                            <div class="result-field">
+                                <div class="d-flex justify-content-between">
+                                    <small class="text-muted">${field.label}</small>
+                                    ${getConfidenceBadge(data.confidence)}
+                                </div>
+                                <strong>${data.value}</strong>
+                            </div>
+                        `;
+                    }
+                });
+            }
+            
+            // Result Summary
+            if (extractedData.result) {
+                html += '<div class="mt-3"><strong><i class="fas fa-chart-bar me-2"></i>Result Summary</strong></div>';
+                
+                const result = extractedData.result;
+                
+                if (result.total_marks && result.total_marks.value !== null) {
+                    const maxMarks = result.max_total_marks && result.max_total_marks.value !== null 
+                        ? `/${result.max_total_marks.value}` 
+                        : '';
                     html += `
                         <div class="result-field">
                             <div class="d-flex justify-content-between">
-                                <small class="text-muted">${field.label}</small>
-                                ${confidence ? getConfidenceBadge(confidence) : ''}
+                                <small class="text-muted">Total Marks</small>
+                                ${getConfidenceBadge(result.total_marks.confidence)}
                             </div>
-                            <strong>${value}</strong>
+                            <strong>${result.total_marks.value}${maxMarks}</strong>
                         </div>
                     `;
                 }
-            });
-            
-            // Display subjects
-            if (extractedData.subjects && extractedData.subjects.length > 0) {
-                html += '<div class="mt-3"><strong>Subjects:</strong></div>';
-                extractedData.subjects.forEach(subject => {
+                
+                if (result.percentage && result.percentage.value !== null) {
                     html += `
                         <div class="result-field">
-                            <strong>${subject.name}</strong>
-                            <div class="small">
-                                Marks: ${subject.marks_obtained}/${subject.marks_maximum}
-                                ${subject.grade ? ` | Grade: ${subject.grade}` : ''}
+                            <div class="d-flex justify-content-between">
+                                <small class="text-muted">Percentage</small>
+                                ${getConfidenceBadge(result.percentage.confidence)}
+                            </div>
+                            <strong>${result.percentage.value}%</strong>
+                        </div>
+                    `;
+                }
+                
+                if (result.result_status && result.result_status.value) {
+                    const statusClass = result.result_status.value.toUpperCase() === 'PASS' 
+                        ? 'text-success' 
+                        : 'text-danger';
+                    html += `
+                        <div class="result-field">
+                            <div class="d-flex justify-content-between">
+                                <small class="text-muted">Status</small>
+                                ${getConfidenceBadge(result.result_status.confidence)}
+                            </div>
+                            <strong class="${statusClass}">${result.result_status.value}</strong>
+                        </div>
+                    `;
+                }
+            }
+            
+            // Subjects
+            if (extractedData.subjects && extractedData.subjects.length > 0) {
+                html += `<div class="mt-3"><strong><i class="fas fa-book me-2"></i>Subjects (${extractedData.subjects.length})</strong></div>`;
+                html += '<div style="max-height: 300px; overflow-y: auto;">';
+                
+                extractedData.subjects.forEach(subject => {
+                    const name = subject.subject_name && subject.subject_name.value 
+                        ? subject.subject_name.value 
+                        : 'Unknown Subject';
+                    const marks = subject.obtained_marks && subject.obtained_marks.value !== null
+                        ? subject.obtained_marks.value
+                        : '-';
+                    const maxMarks = subject.max_marks && subject.max_marks.value !== null
+                        ? subject.max_marks.value
+                        : '-';
+                    const grade = subject.grade && subject.grade.value
+                        ? subject.grade.value
+                        : '';
+                    
+                    html += `
+                        <div class="result-field">
+                            <strong class="d-block mb-1">${name}</strong>
+                            <div class="d-flex justify-content-between small">
+                                <span>Marks: <strong>${marks}${maxMarks !== '-' ? '/' + maxMarks : ''}</strong></span>
+                                ${grade ? `<span>Grade: <strong>${grade}</strong></span>` : ''}
                             </div>
                         </div>
                     `;
                 });
+                
+                html += '</div>';
             }
             
+            // Processing Notes
+            if (extractedData.processing_notes && extractedData.processing_notes.length > 0) {
+                html += '<div class="mt-3"><small class="text-muted"><i class="fas fa-info-circle me-1"></i>Notes:</small></div>';
+                extractedData.processing_notes.forEach(note => {
+                    html += `<small class="text-muted d-block">• ${note}</small>`;
+                });
+            }
+            
+            // JSON Download Button
+            html += `
+                <div class="mt-3 d-grid">
+                    <button class="btn btn-outline-primary btn-sm" onclick='downloadJSON(${JSON.stringify(data)})'>
+                        <i class="fas fa-download me-1"></i>Download Full JSON
+                    </button>
+                </div>
+            `;
+            
             container.innerHTML = html;
+        }
+        
+        function downloadJSON(data) {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `extraction_${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
 
         function getConfidenceBadge(confidence) {
@@ -871,6 +1081,150 @@
             setTimeout(() => {
                 el.innerHTML = '';
             }, 5000);
+        }
+        
+        // === BATCH UPLOAD FUNCTIONS ===
+        let batchFiles = [];
+        
+        function handleBatchFileSelect(e) {
+            const files = Array.from(e.target.files);
+            addBatchFiles(files);
+        }
+        
+        function handleBatchDrop(e) {
+            const dt = e.dataTransfer;
+            const files = Array.from(dt.files);
+            addBatchFiles(files);
+        }
+        
+        function addBatchFiles(files) {
+            // Validate and filter files
+            const validFiles = files.filter(file => {
+                if (file.size > 10 * 1024 * 1024) {
+                    alert(`${file.name} is too large (max 10MB)`);
+                    return false;
+                }
+                const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
+                if (!allowedTypes.includes(file.type)) {
+                    alert(`${file.name} has invalid type`);
+                    return false;
+                }
+                return true;
+            });
+            
+            // Add to batch (max 10 total)
+            batchFiles = [...batchFiles, ...validFiles].slice(0, 10);
+            
+            if (batchFiles.length > 0) {
+                updateBatchFilesList();
+                document.getElementById('selectedBatchFiles').classList.remove('hidden');
+            }
+        }
+        
+        function updateBatchFilesList() {
+            const countEl = document.getElementById('batchFileCount');
+            const listEl = document.getElementById('batchFileList');
+            
+            countEl.textContent = batchFiles.length;
+            
+            let html = '';
+            batchFiles.forEach((file, index) => {
+                const sizeKB = (file.size / 1024).toFixed(1);
+                html += `
+                    <div class="d-flex justify-content-between align-items-center p-2 mb-1 bg-light rounded">
+                        <span class="text-truncate" style="max-width: 300px;">
+                            <i class="fas fa-file me-2"></i>${file.name} <small class="text-muted">(${sizeKB} KB)</small>
+                        </span>
+                        <button class="btn btn-sm btn-danger" onclick="removeBatchFile(${index})">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                `;
+            });
+            
+            listEl.innerHTML = html;
+        }
+        
+        function removeBatchFile(index) {
+            batchFiles.splice(index, 1);
+            if (batchFiles.length === 0) {
+                document.getElementById('selectedBatchFiles').classList.add('hidden');
+            } else {
+                updateBatchFilesList();
+            }
+        }
+        
+        function clearBatchFiles() {
+            batchFiles = [];
+            document.getElementById('batchFileInput').value = '';
+            document.getElementById('selectedBatchFiles').classList.add('hidden');
+        }
+        
+        async function extractBatch() {
+            if (batchFiles.length === 0) return;
+            
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            
+            progressContainer.classList.add('active');
+            progressBar.style.width = '20%';
+            progressText.textContent = `Uploading ${batchFiles.length} files...`;
+            
+            const formData = new FormData();
+            batchFiles.forEach(file => {
+                formData.append('files', file);
+            });
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/extract/batch`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${authToken}` },
+                    body: formData
+                });
+                
+                progressBar.style.width = '80%';
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    progressBar.style.width = '100%';
+                    
+                    // Check if async (job-based) or sync (results-based)
+                    if (data.jobs) {
+                        // Async - add all jobs
+                        progressText.textContent = `${data.total_files} jobs submitted!`;
+                        data.jobs.forEach(job => {
+                            addJob(job.job_id, job.filename);
+                            startJobPolling(job.job_id);
+                        });
+                    } else if (data.results) {
+                        // Sync - show results
+                        progressText.textContent = `Completed! ${data.successful}/${data.total_files} successful`;
+                        
+                        // Display first successful result
+                        const firstSuccess = data.results.find(r => r.success);
+                        if (firstSuccess) {
+                            displayResult(firstSuccess);
+                        }
+                        
+                        // Show summary
+                        showMessage('authMessage', 'success', 
+                            `Batch completed: ${data.successful} successful, ${data.failed} failed`);
+                    }
+                    
+                    setTimeout(() => {
+                        progressContainer.classList.remove('active');
+                        clearBatchFiles();
+                        loadUserStats();
+                    }, 1500);
+                } else {
+                    throw new Error(data.detail || 'Batch extraction failed');
+                }
+            } catch (error) {
+                progressContainer.classList.remove('active');
+                alert('Error: ' + error.message);
+            }
         }
     </script>
 </body>

@@ -15,6 +15,7 @@ import time
 import uuid
 
 from app.core.config import settings
+from app.core.validators import ConfigValidator, log_validation_results
 from app.utils.exceptions import MarksheetExtractionError
 from app.services.extraction import llm_service
 from app.api.routes import api_router
@@ -50,6 +51,14 @@ logger.add(
 async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
     
+    # validate config
+    validation_results = ConfigValidator.validate_all()
+    log_validation_results(validation_results)
+    
+    if not validation_results["valid"]:
+        logger.error("Application startup aborted due to configuration errors")
+        raise RuntimeError("Invalid configuration - check logs for details")
+    
     # Connect to MongoDB
     if settings.mongodb_enabled:
         from app.core.database import mongodb
@@ -58,10 +67,12 @@ async def lifespan(app: FastAPI):
     # Initialize LLM service
     try:
         await llm_service.initialize()
-        logger.info("LLM service initialized successfully")
+        logger.success(f"✓ LLM service initialized ({settings.default_llm_provider} / {settings.gemini_model if settings.default_llm_provider == 'gemini' else settings.openai_model})")
     except Exception as e:
-        logger.warning(f"LLM service initialization deferred: {e}")
+        logger.error(f"✗ LLM service initialization failed: {e}")
+        raise RuntimeError(f"Failed to initialize LLM service: {e}")
     
+    logger.success(f"✓ {settings.app_name} started successfully")
     yield
     
     # Shutdown - disconnect MongoDB

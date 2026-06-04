@@ -2,10 +2,12 @@ from celery import Celery, signals
 from app.core.config import settings
 from loguru import logger
 
+redis_url = settings.get_redis_url()
+
 celery_app = Celery(
     "marksheet_extraction",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
+    broker=redis_url,
+    backend=redis_url,
     include=["app.tasks.extraction_tasks", "app.tasks.batch_tasks"]
 )
 

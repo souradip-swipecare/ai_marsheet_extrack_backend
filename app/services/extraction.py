@@ -15,7 +15,7 @@ from app.core.config import settings
 from app.services.prompts import (
     EXTRACTION_SYSTEM_PROMPT,
     EXTRACTION_USER_PROMPT,
-    VISION_EXTRACTION_PROMPT,
+    COMPREHENSIVE_VISION_PROMPT,
     VALIDATION_PROMPT
 )
 from app.models.schemas import MarksheetExtraction
@@ -181,7 +181,7 @@ class GeminiExtractor:
                     types.Content(
                         role="user",
                         parts=[
-                            types.Part(text=VISION_EXTRACTION_PROMPT),
+                            types.Part(text=COMPREHENSIVE_VISION_PROMPT),
                             *image_parts,
                         ],
                     )

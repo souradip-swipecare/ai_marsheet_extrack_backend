@@ -18,7 +18,15 @@ class MongoDB:
             return
         
         try:
-            self.client = AsyncIOMotorClient(settings.mongodb_url)
+            # SSL/TLS configuration for Python 3.13 compatibility
+            import ssl
+            
+            self.client = AsyncIOMotorClient(
+                settings.mongodb_url,
+                tlsAllowInvalidCertificates=True,
+                serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=10000,
+            )
             self.db = self.client[settings.mongodb_db_name]
             
             # Test connection
@@ -35,13 +43,13 @@ class MongoDB:
     
     async def disconnect(self):
         """Disconnect from MongoDB"""
-        if self.client:
+        if self.client is not None:
             self.client.close()
             logger.info("Disconnected from MongoDB")
     
     async def _create_indexes(self):
         """Create database indexes for performance"""
-        if not self.db:
+        if self.db is None:
             return
         
         try:

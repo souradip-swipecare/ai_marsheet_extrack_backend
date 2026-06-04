@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(default=None)
     default_llm_provider: str = Field(default="gemini")
 
-    gemini_model: str = Field(default="gemini-2.5-flash")
+    gemini_model: str = Field(default="gemini-2.5-flash")  # 2026: 1.5 models deprecated, using 2.5
     openai_model: str = Field(default="gpt-4o")
     
     api_key_enabled: bool = Field(default=False)
@@ -44,7 +44,11 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO")
     log_file: str = Field(default="logs/app.log")
     
-    redis_url: str = Field(default="redis://localhost:6379/0")
+    # Redis Configuration
+    redis_addr: Optional[str] = Field(default=None)
+    redis_password: Optional[str] = Field(default=None)
+    redis_db: int = Field(default=0)
+    redis_url: Optional[str] = Field(default=None)
     celery_enabled: bool = Field(default=False)
     
     # MongoDB Settings
@@ -65,6 +69,20 @@ class Settings(BaseSettings):
     @property
     def allowed_extensions_list(self) -> List[str]:
         return [ext.strip().lower() for ext in self.allowed_extensions.split(",")]
+    
+    def get_redis_url(self) -> str:
+        """Construct Redis URL from individual components or use provided URL"""
+        if self.redis_url:
+            return self.redis_url
+        
+        if not self.redis_addr:
+            return "redis://localhost:6379/0"
+        
+        # Construct URL from components
+        if self.redis_password:
+            return f"redis://:{self.redis_password}@{self.redis_addr}/{self.redis_db}"
+        else:
+            return f"redis://{self.redis_addr}/{self.redis_db}"
     
     def validate_llm_config(self) -> bool:
         if self.default_llm_provider == "gemini" and not self.google_api_key:

@@ -3,6 +3,7 @@ from datetime import datetime, date
 from typing import Optional, Dict, Any, List
 from bson import ObjectId
 from loguru import logger
+import uuid
 
 from app.core.database import mongodb
 from app.models.user_schemas import (
@@ -15,14 +16,18 @@ from app.models.user_schemas import (
 class LoggingService:
     
     async def create_extraction_log(self, log_data: ExtractionLogCreate) -> str:
-        if not mongodb.db:
+        if mongodb.db is None:
             return ""
         
         logs_collection = mongodb.get_collection("extraction_logs")
         
+        job_id = log_data.job_id
+        if job_id is None:
+            job_id = f"single_{uuid.uuid4().hex[:16]}"
+        
         log_doc = {
             "user_id": log_data.user_id,
-            "job_id": log_data.job_id,
+            "job_id": job_id,
             "filename": log_data.filename,
             "file_size_bytes": log_data.file_size_bytes,
             "extraction_method": log_data.extraction_method,
@@ -51,8 +56,7 @@ class LoggingService:
         log_id: str,
         update_data: ExtractionLogUpdate
     ):
-        """Update extraction log with results"""
-        if not mongodb.db or not log_id:
+        if mongodb.db is None or not log_id:
             return
         
         logs_collection = mongodb.get_collection("extraction_logs")
@@ -69,25 +73,24 @@ class LoggingService:
         except Exception as e:
             logger.error(f"Failed to update extraction log: {e}")
     
-    async def log_user_activity(self, activity: UserActivityLog):
-        """Log user activity"""
-        if not mongodb.db:
+    async def log_user_activity(self, activity: Dict[str, Any]):
+        if mongodb.db is None:
             return
         
         activity_collection = mongodb.get_collection("user_activity")
         
         activity_doc = {
-            "user_id": activity.user_id,
-            "action": activity.action,
-            "details": activity.details,
-            "ip_address": activity.ip_address,
-            "user_agent": activity.user_agent,
+            "user_id": activity.get("user_id"),
+            "action": activity.get("action"),
+            "details": activity.get("details", {}),
+            "ip_address": activity.get("ip_address"),
+            "user_agent": activity.get("user_agent"),
             "timestamp": datetime.utcnow()
         }
         
         try:
             await activity_collection.insert_one(activity_doc)
-            logger.debug(f"User activity logged: {activity.action}")
+            logger.debug(f"User activity logged: {activity.get('action')}")
         except Exception as e:
             logger.error(f"Failed to log user activity: {e}")
     
@@ -98,8 +101,7 @@ class LoggingService:
         cost_usd: float = 0.0,
         processing_time_ms: float = 0.0
     ):
-        """Update API usage statistics"""
-        if not mongodb.db:
+        if mongodb.db is None:
             return
         
         usage_collection = mongodb.get_collection("api_usage")
@@ -138,8 +140,7 @@ class LoggingService:
         limit: int = 100,
         skip: int = 0
     ) -> List[Dict[str, Any]]:
-        """Get user's extraction logs"""
-        if not mongodb.db:
+        if mongodb.db is None:
             return []
         
         logs_collection = mongodb.get_collection("extraction_logs")
@@ -161,8 +162,7 @@ class LoggingService:
             return []
     
     async def get_user_stats(self, user_id: str) -> Dict[str, Any]:
-        """Get user statistics"""
-        if not mongodb.db:
+        if mongodb.db is None:
             return {}
         
         usage_collection = mongodb.get_collection("api_usage")

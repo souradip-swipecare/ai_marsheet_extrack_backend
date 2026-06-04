@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from celery import Task
 from loguru import logger
 
@@ -9,18 +9,48 @@ from app.services.extraction import llm_service
 from app.services.quality_analyzer import quality_analyzer
 from app.utils.file_processor import file_processor
 from app.core.config import settings
+from app.services.ocr_service import ocr_service
+from app.services.logging_service import logging_service
+from app.models.user_schemas import ExtractionLogUpdate
 
 
 class CallbackTask(Task):
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         logger.error(f"Task {task_id} failed: {exc}")
+        # Update MongoDB log if log_id exists
+        log_id = kwargs.get('log_id')
+        if log_id and settings.mongodb_enabled:
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(
+                        logging_service.update_extraction_log(
+                            log_id,
+                            ExtractionLogUpdate(
+                                status="failed",
+                                error=str(exc)
+                            )
+                        )
+                    )
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.error(f"Failed to update MongoDB log on failure: {e}")
         
     def on_success(self, retval, task_id, args, kwargs):
         logger.info(f"Task {task_id} completed successfully")
 
 
 @celery_app.task(bind=True, base=CallbackTask, name="extract_marksheet_task")
-def extract_marksheet_task(self, file_data: bytes, filename: str, user_api_key: str = None) -> Dict[str, Any]:
+def extract_marksheet_task(
+    self, 
+    file_data: bytes, 
+    filename: str, 
+    user_api_key: str = None,
+    log_id: Optional[str] = None,
+    user_id: Optional[str] = None
+) -> Dict[str, Any]:
     
     try:
         self.update_state(state='PROCESSING', meta={'progress': 10, 'status': 'Starting extraction'})
@@ -41,8 +71,6 @@ def extract_marksheet_task(self, file_data: bytes, filename: str, user_api_key: 
             extraction_method = "unknown"
             
             if file_type == "text_pdf":
-                from app.services.ocr_service import ocr_service
-                
                 text_content = processed["text_content"]
                 ocr_results = [
                     {"page": idx + 1, "text": text, "avg_confidence": 0.99}
@@ -55,8 +83,10 @@ def extract_marksheet_task(self, file_data: bytes, filename: str, user_api_key: 
                 extraction_method = "text_pdf_llm"
                 
             else:
-                from app.services.ocr_service import ocr_service
-                
+                # Extract images from processed data
+                images = processed.get("images", [])
+                if not images:
+                    raise ValueError("No images found in processed file")
                 
                 # quality-based routing
                 first_image_bytes, _ = images[0]
@@ -114,9 +144,42 @@ def extract_marksheet_task(self, file_data: bytes, filename: str, user_api_key: 
             }
             cost_estimate = cost_map.get(extraction_method, 0.0001)
             
+            # Update MongoDB log on success
+            if log_id and settings.mongodb_enabled:
+                try:
+                    loop.run_until_complete(
+                        logging_service.update_extraction_log(
+                            log_id,
+                            ExtractionLogUpdate(
+                                status="completed",
+                                extraction_data=extraction.model_dump(),  # Convert Pydantic model to dict
+                                extraction_confidence=extraction.extraction_confidence,
+                                processing_time_ms=0,  # Will be calculated by the caller
+                                cost_estimate_usd=cost_estimate
+                            )
+                        )
+                    )
+                    logger.info(f"Updated MongoDB log {log_id} with extraction results")
+                except Exception as e:
+                    logger.error(f"Failed to update MongoDB log on success: {e}")
+            
+            # Update API usage stats
+            if user_id and settings.mongodb_enabled:
+                try:
+                    loop.run_until_complete(
+                        logging_service.update_api_usage_stats(
+                            user_id=user_id,
+                            success=True,
+                            cost_usd=cost_estimate,
+                            processing_time_ms=0
+                        )
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to update API usage stats: {e}")
+            
             return {
                 "success": True,
-                "data": extraction,
+                "data": extraction.model_dump(),  
                 "filename": filename,
                 "extraction_method": extraction_method,
                 "cost_estimate_usd": cost_estimate

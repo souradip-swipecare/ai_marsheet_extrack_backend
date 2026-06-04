@@ -51,7 +51,9 @@ class ExtractionLogCreate(BaseModel):
 
 
 class ExtractionLogUpdate(BaseModel):
+    job_id: Optional[str] = None
     status: Optional[str] = None
+    extraction_method: Optional[str] = None
     extraction_data: Optional[dict] = None
     extraction_confidence: Optional[float] = None
     processing_time_ms: Optional[float] = None

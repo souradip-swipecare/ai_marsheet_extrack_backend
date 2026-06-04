@@ -114,17 +114,16 @@ async def log_user_activity_middleware(request: Request) -> None:
             action = "job_check"
         
         # Log activity
-        await logging_service.log_user_activity(UserActivityLog(
-            user_id=ObjectId(current_user["user_id"]),
-            action=action,
-            details={
+        await logging_service.log_user_activity({
+            "user_id": current_user["user_id"],
+            "action": action,
+            "details": {
                 "path": request.url.path,
                 "method": request.method
             },
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            timestamp=datetime.utcnow()
-        ))
+            "ip_address": request.client.host if request.client else None,
+            "user_agent": request.headers.get("user-agent")
+        })
     except Exception as e:
         # Don't fail the request if logging fails
         logger.error(f"Failed to log user activity: {e}")

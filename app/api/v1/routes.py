@@ -123,14 +123,13 @@ async def extract_marksheet(
         request_id = getattr(request.state, "request_id", "unknown")
         
         # Log user activity
-        await logging_service.log_user_activity(UserActivityLog(
-            user_id=ObjectId(user_id),
-            action="extract",
-            details={"filename": file.filename, "sync": True},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            timestamp=datetime.utcnow()
-        ))
+        await logging_service.log_user_activity({
+            "user_id": user_id,
+            "action": "extract",
+            "details": {"filename": file.filename, "sync": True},
+            "ip_address": request.client.host if request.client else None,
+            "user_agent": request.headers.get("user-agent")
+        })
         
         logger.info(f"Authenticated request from user {user_id}")
     
@@ -144,7 +143,7 @@ async def extract_marksheet(
         if user_id and settings.mongodb_enabled:
             extraction_log_id = await logging_service.create_extraction_log(
                 ExtractionLogCreate(
-                    user_id=ObjectId(user_id),
+                    user_id=user_id,
                     job_id=request_id,
                     filename=file.filename,
                     file_size_bytes=file_size,
@@ -246,11 +245,11 @@ async def extract_marksheet(
             )
             
             # Increment user extraction count
-            await user_service.increment_extraction_count(ObjectId(user_id))
+            await user_service.increment_extraction_count(user_id)
             
             # Update API usage stats
             await logging_service.update_api_usage_stats(
-                ObjectId(user_id),
+                user_id,
                 success=True,
                 processing_time_ms=int(processing_time),
                 cost_usd=cost_map.get(extraction_method, 0.0001)
@@ -353,19 +352,54 @@ async def submit_extraction_job(
             content_type=file.content_type
         )
         
-        task = extract_marksheet_task.delay(file_content, file.filename, apikey)
-        
-        # Log activity if authenticated (from middleware)
+        # Get authenticated user info
         current_user = getattr(request.state, "user", None)
+        user_id = current_user["user_id"] if current_user else None
+        request_id = getattr(request.state, "request_id", "unknown")
+        
+        # Create MongoDB extraction log
+        log_id = None
         if current_user and settings.mongodb_enabled:
-            await logging_service.log_user_activity(UserActivityLog(
-                user_id=ObjectId(current_user["user_id"]),
-                action="extract_async",
-                details={"filename": file.filename, "job_id": task.id},
-                ip_address=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent"),
-                timestamp=datetime.utcnow()
-            ))
+            from app.models.user_schemas import ExtractionLogCreate
+            
+            log_id = await logging_service.create_extraction_log(
+                ExtractionLogCreate(
+                    user_id=user_id,
+                    job_id=None,  # Will be updated with task.id
+                    filename=file.filename,
+                    file_size_bytes=file_size,
+                    extraction_method="async_celery",
+                    status="queued",
+                    request_id=request_id
+                )
+            )
+        
+        # Submit Celery task with MongoDB log info
+        task = extract_marksheet_task.delay(
+            file_content, 
+            file.filename, 
+            apikey,
+            log_id=log_id,
+            user_id=user_id
+        )
+        
+        # Update log with job_id
+        if log_id and settings.mongodb_enabled:
+            from app.models.user_schemas import ExtractionLogUpdate
+            await logging_service.update_extraction_log(
+                log_id,
+                ExtractionLogUpdate(job_id=task.id)
+            )
+        
+        # Log activity if authenticated
+        if current_user and settings.mongodb_enabled:
+            await logging_service.log_user_activity({
+                "user_id": user_id,
+                "action": "extract_async",
+                "details": {"filename": file.filename, "job_id": task.id, "log_id": log_id},
+                "ip_address": request.client.host if request.client else None,
+                "user_agent": request.headers.get("user-agent")
+            })
         
         return JobSubmitResponse(
             success=True,
@@ -521,14 +555,13 @@ async def batch_extract_marksheets(
     # Log batch activity if authenticated (from middleware)
     current_user = getattr(request.state, "user", None)
     if current_user and settings.mongodb_enabled:
-        await logging_service.log_user_activity(UserActivityLog(
-            user_id=ObjectId(current_user["user_id"]),
-            action="batch_extract",
-            details={"file_count": len(files), "async": settings.celery_enabled},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            timestamp=datetime.utcnow()
-        ))
+        await logging_service.log_user_activity({
+            "user_id": current_user["user_id"],
+            "action": "batch_extract",
+            "details": {"file_count": len(files), "async": settings.celery_enabled},
+            "ip_address": request.client.host if request.client else None,
+            "user_agent": request.headers.get("user-agent")
+        })
     
     # if celery enabled, submit all as async jobs
     if settings.celery_enabled:
