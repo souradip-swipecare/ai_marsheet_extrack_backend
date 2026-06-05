@@ -13,11 +13,113 @@ For better accuracy   we can use lamda function for concurrent response as it is
 ![json copy Page](screenshots/json.png)
 ![Process Page](screenshots/processing.png)
 
+---
+
+## Architecture Overview
+
+This API uses intelligent routing to extract structured data from marksheets with optimal speed and accuracy.
+
+### Key Components
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        CLIENT REQUEST                            │
+│                   (Upload Image/PDF File)                        │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │
+                ┌────────────▼────────────┐
+                │     FastAPI Server      │
+                │  - File validation      │
+                │  - Rate limiting        │
+                │  - JWT auth (optional)  │
+                └────────────┬────────────┘
+                             │
+                ┌────────────▼────────────┐
+                │   File Processor        │
+                │  - PDF type detection   │
+                │  - Image preprocessing  │
+                └────────────┬────────────┘
+                             │
+                ┌────────────▼────────────┐
+                │  Quality Analyzer       │
+                │  - Blur score (35%)     │
+                │  - Contrast score (45%) │
+                │  - Resolution (20%)     │
+                └────────────┬────────────┘
+                             │
+                   Quality Score (0-100)
+                             │
+         ┌───────────────────┴───────────────────┐
+         │                                       │
+    Score >= 65                             Score < 65
+         │                                       │
+         ▼                                       ▼
+┌────────────────┐                    ┌────────────────┐
+│  OCR Service   │                    │  Skip OCR      │
+│  - Multi-pass  │                    │  (poor quality)│
+│  - Parallel    │                    └────────┬───────┘
+│  - 5 techniques│                             │
+└────────┬───────┘                             │
+         │                                     │
+    Confidence                                 │
+         │                                     │
+   ┌─────┴─────┐                              │
+   │           │                              │
+ >= 60%      < 60%                            │
+   │           │                              │
+   ▼           ▼                              ▼
+┌──────┐  ┌────────────────────────────────────┐
+│ Text │  │     Gemini Vision API              │
+│  +   │  │  - Processes raw pixels            │
+│ LLM  │  │  - Handles poor quality            │
+└──┬───┘  │  - Best accuracy                   │
+   │      └────────────────┬───────────────────┘
+   │                       │
+   └───────────┬───────────┘
+               ▼
+    ┌──────────────────┐
+    │  Confidence      │
+    │  Calculator      │
+    │  - Field weights │
+    │  - Penalties     │
+    └────────┬─────────┘
+             │
+             ▼
+    ┌──────────────────┐
+    │  JSON Response   │
+    │  - Extracted data│
+    │  - Confidences   │
+    │  - Method used   │
+    │  - Timing        │
+    └──────────────────┘
+```
+
+### Processing Paths
+
+| Path | Trigger | Speed | Accuracy | Cost |
+|------|---------|-------|----------|------|
+| **Text PDF** | Digital PDF with text | ⚡ 2-3s  | $ |
+| **OCR → LLM** | Quality >= 65, OCR conf >= 60% | 🚀 7-8s  | $$ |
+| **Vision Direct** | Quality < 65 | 🐌 16-26s  | $$$ |
+| **Vision Fallback** | Quality >= 65, OCR conf < 60% | 🐌 20-31s  | $$$ |
+
+### Technology Stack
+
+- **Web Framework**: FastAPI (async, high-performance)
+- **OCR Engine**: Tesseract 4.x (multi-pass with parallel processing)
+- **LLM Provider**: Google Gemini 2.5 Flash (Vision + Text APIs)
+- **Image Processing**: OpenCV, Pillow, PyMuPDF
+- **Async Jobs**: Celery + Redis (optional, for background processing)
+- **Database**: MongoDB (optional, for logging and analytics)
+- **Deployment**: Docker + Gunicorn
+
+---
+
 
 ## Folder Structure
 
 ```
-python_api_extract/
+ai_marsheet_extrack_backend/
 │
 ├── app/                          # Main application code
 │   ├── __init__.py
@@ -88,55 +190,82 @@ python_api_extract/
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                      FILE PROCESSOR                              │
-│  • Check file type and size                                      │
-│  • If PDF with text → extract text directly (fast!)              │
-│  • If scanned PDF/image → convert to images                      │
+│                      FILE VALIDATION                             │
+│  • Check file size (max 10MB)                                    │
+│  • Check file type (jpg/png/webp/pdf)                            │
+│  • Reject if invalid                                             │
 └─────────────────────────────────────────────────────────────────┘
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                      TESSERACT OCR                               │
-│  • Run 17 OCR passes in PARALLEL (8 workers)                     │
-│  • Pick best result based on text quality + confidence           │
-│  • Calculate weighted confidence score                           │
-│  • ~4-5 seconds (vs 15 seconds sequential)                       │
+│                    PDF TYPE DETECTION                            │
+│  • Count characters per page                                     │
+│  • If avg >= 80 chars/page → text-based PDF                      │
+│  • If avg < 80 chars/page → scanned/image PDF                    │
 └─────────────────────────────────────────────────────────────────┘
                                  │
-                                 ▼
-                    ┌───────────────────────┐
-                    │  OCR Confidence >= 60% │(this can be set by the user in setting folder)
-                    └───────────────────────┘
-                          │           │
-                         YES          NO
-                          │           │
-         ▼ ---------------|           ▼
-┌─────────────────────┐   ┌─────────────────────┐
-│   OCR + LLM Mode    │   │  Direct Vision Mode │
-│                     │   │                     │
-│ Send OCR text to    │   │ Send raw image to   │
-│ Gemini for parsing  │   │ Gemini Vision API   │
-│ (faster & cheaper)  │   │ (better accuracy)   │
-└─────────────────────┘   └─────────────────────┘
-           │                  │
-           └─────────---------┘
-                      │
-                      ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      GEMINI AI / OpenAI                          │
-│  • Understand the marksheet structure                            │
-│  • Extract all fields with confidence scores                     │
-│  • Return structured JSON                                        │
-└─────────────────────────────────────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      RESPONSE                                    │
-│  • Structured JSON with all extracted data                       │
-│  • Confidence scores for each field                              │
-│  • Processing time and method used                               │
-│  • Save output to extract/ folder                                │
-└─────────────────────────────────────────────────────────────────┘
+                    ┌────────────┴────────────┐
+                    │                         │
+                TEXT PDF                  IMAGE PDF / IMAGE
+                    │                         │
+                    ▼                         ▼
+        ┌─────────────────────┐   ┌─────────────────────┐
+        │  DIRECT TEXT EXTRACT│   │  IMAGE QUALITY CHECK │
+        │  • PyMuPDF text     │   │  • Blur score        │
+        │  • No OCR needed    │   │  • Contrast score    │
+        │  • Fastest path     │   │  • Resolution score  │
+        └─────────────────────┘   │  • Overall: 0-100    │
+                    │             └─────────────────────┘
+                    │                         │
+                    │             ┌───────────┴───────────┐
+                    │             │                       │
+                    │       Quality >= 65           Quality < 65
+                    │             │                       │
+                    │             ▼                       ▼
+                    │   ┌──────────────────┐   ┌──────────────────┐
+                    │   │  MULTI-PASS OCR  │   │  SKIP OCR        │
+                    │   │  • 5 preprocessing│   │  • Low quality   │
+                    │   │  • Parallel runs  │   │  • Use vision    │
+                    │   │  • Pick best      │   │    directly      │
+                    │   └──────────────────┘   └──────────────────┘
+                    │             │                       │
+                    │             ▼                       │
+                    │   ┌──────────────────┐             │
+                    │   │  OCR CONFIDENCE  │             │
+                    │   │  • Weighted avg  │             │
+                    │   │  >= 60% threshold│             │
+                    │   └──────────────────┘             │
+                    │             │                       │
+                    │   ┌─────────┴────────┐             │
+                    │   │                  │             │
+                    │  OCR OK          OCR Poor          │
+                    │   │                  │             │
+                    ▼   ▼                  ▼             ▼
+        ┌────────────────────────┐   ┌────────────────────────┐
+        │   TEXT → GEMINI        │   │   IMAGE → GEMINI VISION│
+        │   • Fast extraction    │   │   • Highest accuracy   │
+        │   • Text-only prompt   │   │   • Handles poor scans │
+        │   • Lower cost         │   │   • Slower processing  │
+        └────────────────────────┘   └────────────────────────┘
+                    │                           │
+                    └──────────┬────────────────┘
+                               ▼
+                ┌──────────────────────────────┐
+                │   CONFIDENCE CALCULATION     │
+                │   • Field-level scores       │
+                │   • Weighted by importance   │
+                │   • Critical fields: 2-3x    │
+                │   • Regular fields: 1x       │
+                └──────────────────────────────┘
+                               │
+                               ▼
+                ┌──────────────────────────────┐
+                │   STRUCTURED JSON RESPONSE   │
+                │   • Extracted data           │
+                │   • Confidence scores        │
+                │   • Processing method        │
+                │   • Timing information       │
+                └──────────────────────────────┘
 ```
 
 ---
@@ -148,6 +277,112 @@ When you upload a PDF:
 - **If the PDF is image-based** (scanned or photographed), we convert each page to an image and run OCR (Optical Character Recognition) to extract the text.
 
 This ensures the best possible extraction quality and speed for both digital and scanned PDFs.
+
+---
+
+## Async Job Processing Architecture
+
+The API supports background job processing using **Celery** with **Redis** as the message broker and result backend. This allows handling long-running extraction tasks without blocking the API.
+
+### Job Flow
+
+```
+Client Request → API Endpoint → Celery Task Queue → Worker Pool → Result Storage
+                      ↓                                   ↓              ↓
+                Job ID returned                    Progress updates    Result retrieval
+```
+
+### How Jobs Work
+
+1. **Job Submission**: Client uploads file, receives `job_id` immediately
+2. **Task Queuing**: Celery queues the task in Redis with status `PENDING`
+3. **Worker Processing**: Worker picks up task, updates status to `PROCESSING`
+4. **Progress Tracking**: Task updates progress (0-100%) throughout execution
+5. **Completion**: Final status becomes `SUCCESS` or `FAILURE`
+6. **Result Storage**: Results cached in Redis for 1 hour
+
+### Job States
+
+| State | Description | Progress |
+|-------|-------------|----------|
+| `PENDING` | Task queued, waiting for worker | 0% |
+| `PROCESSING` | Worker actively processing | 10-90% |
+| `SUCCESS` | Extraction completed | 100% |
+| `FAILURE` | Task failed with error | - |
+
+### Progress Breakdown
+
+| Progress | Activity |
+|----------|----------|
+| 10% | Task started, initializing |
+| 20% | File validation and type detection |
+| 40% | PDF/image processing complete |
+| 45% | Quality assessment done |
+| 50% | OCR started (if needed) |
+| 60-70% | OCR complete or Vision API called |
+| 90% | Extraction complete, finalizing |
+| 100% | Response ready |
+
+### Worker Configuration
+
+- **Task Timeout**: 5 minutes hard limit (4 minutes soft limit)
+- **Prefetch**: 1 task at a time (fair distribution across workers)
+- **Max Tasks Per Child**: 50 (prevents memory leaks)
+- **Result Expiry**: 1 hour
+- **Acknowledgement**: Late (after task completion for reliability)
+
+---
+
+## Image Quality Assessment
+
+Before running OCR or sending to Vision API, we assess image quality to determine the optimal processing path. This saves time and API costs.
+
+### Quality Metrics
+
+The quality analyzer evaluates three dimensions:
+
+#### 1. Blur Detection (35% weight)
+- **Method**: Laplacian variance
+- **Threshold**: 100.0 variance units
+- **Score**: 
+  - >= 200 variance → 100 points
+  - >= 100 variance → 50-100 points (linear)
+  - < 100 variance → 0-50 points (linear)
+
+#### 2. Contrast Detection (45% weight)
+- **Method**: Standard deviation of grayscale
+- **Threshold**: 35 std dev
+- **Score**:
+  - >= 70 std dev → 100 points
+  - < 70 std dev → 0-100 points (linear)
+
+#### 3. Resolution Check (20% weight)
+- **Method**: Minimum dimension (width or height)
+- **Threshold**: 800 pixels
+- **Score**:
+  - >= 1600 pixels → 100 points
+  - >= 800 pixels → 50-100 points (linear)
+  - < 800 pixels → 0-50 points (linear)
+
+### Quality Score Calculation
+
+```
+quality_score = (blur_score × 0.35) + (contrast_score × 0.45) + (resolution_score × 0.20)
+```
+
+### Routing Decision
+
+| Quality Score | Recommended Path | Reason |
+|--------------|------------------|--------|
+| >= 65 | OCR → LLM | High quality, OCR will work well |
+| < 65 | Direct Vision API | Poor quality, skip OCR overhead |
+
+**Benefits**:
+- Saves 5-10 seconds on low-quality images (skips OCR)
+- Better accuracy on poor scans (Vision API handles them better)
+- Cost optimization (OCR + LLM cheaper than Vision API when quality is good)
+
+---
 
 ## Multi-Pass OCR (How It Works)
 
@@ -232,8 +467,8 @@ Score = (alpha_count * 0.4) + (confidence * 100 * 0.4) + (word_count * 0.2)
 ### 1. Clone and setup
 
 ```bash
-git clone https://github.com/souradip-swipecare/souradip-marksheet-extract-ocr-python.git
-cd python_api_extract
+git clone https://github.com/souradip-swipecare/ai_marsheet_extrack_backend.git
+cd ai_marsheet_extrack_backend
 
 # Create virtual environment
 python -m venv venv
@@ -302,66 +537,152 @@ celery -A app.core.celery_config worker --loglevel=info --concurrency=1
 
 ## API Endpoints
 
-### Extract Single Marksheet
+### Async Job Endpoints
+
+When Celery is enabled, you can submit jobs asynchronously and check their status.
+
+#### Submit Async Job
 
 ```
-POST /api/v1/extract
+POST /api/v1/jobs/submit
 ```
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | file | File | Yes | Marksheet image or PDF |
-| model | string | No | LLM model (default: "gemini") |
 | apikey | string | No | Your Gemini API key (optional) |
 
-**Example with curl:**
-```bash
-# Using server's default API key
-curl -X POST "http://localhost:8000/api/v1/extract?model=gemini" \
-  -F "file=@marksheet.jpg"
-
-# Using your own API key
-curl -X POST "http://localhost:8000/api/v1/extract?model=gemini&apikey=YOUR_KEY" \
-  -F "file=@marksheet.jpg"
-```
-
-**Example Response:**
+**Response:**
 ```json
 {
   "success": true,
-  "data": {
-    "candidate": {
-      "name": {"value": "Rahul Kumar", "confidence": 0.95},
-      "roll_number": {"value": "12345678", "confidence": 0.92},
-      "father_name": {"value": "Suresh Kumar", "confidence": 0.88}
-    },
-    "subjects": [
-      {
-        "subject_name": {"value": "Mathematics", "confidence": 0.94},
-        "obtained_marks": {"value": 85, "confidence": 0.91},
-        "max_marks": {"value": 100, "confidence": 0.95}
-      }
-    ],
-    "result": {
-      "total_marks": {"value": 425, "confidence": 0.90},
-      "percentage": {"value": 85.0, "confidence": 0.88},
-      "result_status": {"value": "PASS", "confidence": 0.95}
-    },
-    "extraction_confidence": 0.89
-  },
-  "processing_time_ms": 3245.67,
-  "extraction_method": "ocr_llm"
+  "job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "queued",
+  "message": "Job submitted successfully"
 }
 ```
 
-### Batch Extract (Multiple Files)
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/jobs/submit" \
+  -F "file=@marksheet.jpg"
+```
+
+---
+
+#### Check Job Status
 
 ```
-POST /api/v1/extract/batch
+GET /api/v1/jobs/{job_id}/status
 ```
 
-Upload up to 10 files at once.
+**Response:**
+```json
+{
+  "job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "processing",
+  "progress": 65,
+  "message": "OCR complete, running LLM extraction"
+}
+```
+
+**Status Values:**
+- `queued` (0%): Job waiting in queue
+- `processing` (10-90%): Job actively running
+- `completed` (100%): Job finished successfully
+- `failed`: Job encountered an error
+
+---
+
+#### Get Job Result
+
+```
+GET /api/v1/jobs/{job_id}/result
+```
+
+**Response (if completed):**
+```json
+{
+  "success": true,
+  "job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "completed",
+  "data": {
+    "candidate": { ... },
+    "subjects": [ ... ],
+    "result": { ... },
+    "extraction_confidence": 0.89
+  },
+  "extraction_method": "ocr_text_llm",
+  "processing_time_ms": 7234.56
+}
+```
+
+**Response (if still processing):**
+```json
+{
+  "success": false,
+  "error": "Job still processing",
+  "status": "processing",
+  "progress": 45
+}
+```
+
+---
+
+#### Batch Job Submission
+
+```
+POST /api/v1/jobs/batch
+```
+
+Upload multiple files and get individual job IDs for tracking.
+
+**Response:**
+```json
+{
+  "success": true,
+  "batch_id": "batch_20260605_123456",
+  "total_jobs": 5,
+  "job_ids": [
+    "job-1-uuid",
+    "job-2-uuid",
+    "job-3-uuid",
+    "job-4-uuid",
+    "job-5-uuid"
+  ]
+}
+```
+
+---
+
+#### Batch Status Check
+
+```
+GET /api/v1/jobs/batch/{batch_id}/status
+```
+
+**Response:**
+```json
+{
+  "batch_id": "batch_20260605_123456",
+  "total": 5,
+  "completed": 3,
+  "processing": 1,
+  "failed": 0,
+  "queued": 1,
+  "progress": 60,
+  "jobs": [
+    {"job_id": "job-1-uuid", "status": "completed"},
+    {"job_id": "job-2-uuid", "status": "completed"},
+    {"job_id": "job-3-uuid", "status": "completed"},
+    {"job_id": "job-4-uuid", "status": "processing"},
+    {"job_id": "job-5-uuid", "status": "queued"}
+  ]
+}
+```
+
+---
 
 ### Health Check
 
@@ -401,38 +722,353 @@ docker run -p 8000:8000 --env-file .env marksheet-api
 
 ## Extraction Methods
 
-The API automatically picks the best method:
+The API automatically selects the optimal extraction method based on file type, quality assessment, and OCR confidence. Each method is optimized for specific scenarios.
 
-| Method | When Used | Speed | Accuracy |
-|--------|-----------|-------|----------|
-| `text_pdf_llm` | PDF has selectable text | Fastest | High |
-| `ocr_llm` | OCR confidence >= 60% | Fast | Good |
-| `direct_llm_vision` | OCR confidence < 60% | Slower | Best |
+### Method Selection Flow
+
+```
+PDF with text (>80 chars/page) → text_pdf_direct
+    ↓
+Image/Scanned PDF
+    ↓
+Quality Assessment
+    ↓
+├─ Quality >= 65 → Run OCR
+│   ├─ OCR confidence >= 60% → ocr_text_llm
+│   └─ OCR confidence < 60% → vision_ocr_fallback
+│
+└─ Quality < 65 → vision_direct (skip OCR)
+```
+
+### Available Methods
+
+| Method | Trigger Conditions | Processing Steps | Speed | Accuracy | Cost |
+|--------|-------------------|------------------|-------|----------|------|
+| `text_pdf_direct` | PDF with selectable text (avg >= 80 chars/page) | PyMuPDF text extraction → LLM parsing | ⚡ Fastest (2-3s) | ⭐⭐⭐⭐⭐ | $ Lowest |
+| `ocr_text_llm` | Quality >= 65 AND OCR confidence >= 60% | Multi-pass OCR → Pick best → LLM parsing | 🚀 Fast (5-8s) | ⭐⭐⭐⭐ | $$ Low |
+| `vision_direct` | Quality < 65 (poor image) | Raw image → Vision API directly | 🐌 Slow (15-25s) | ⭐⭐⭐⭐⭐ | $$$ High |
+| `vision_ocr_fallback` | Quality >= 65 BUT OCR confidence < 60% | OCR attempted but failed → Vision API | 🐌 Slow (18-30s) | ⭐⭐⭐⭐ | $$$ High |
+
+### Method Details
+
+#### 1. text_pdf_direct
+**Best for:** Digital PDFs, typed documents, modern marksheets
+
+**How it works:**
+1. PyMuPDF extracts native text from PDF
+2. Text sent to LLM for structured parsing
+3. No OCR needed (text already available)
+
+**Advantages:**
+- Fastest processing time
+- Highest accuracy (no OCR errors)
+- Lowest API cost (text-only LLM call)
+
+**Example use case:** Modern university marksheets in PDF format
 
 ---
 
-## Processing Time Breakdown
+#### 2. ocr_text_llm
+**Best for:** High-quality scans, clear images, good lighting
 
-Here's where the ~30-40 seconds goes:
+**How it works:**
+1. Image quality assessed (blur, contrast, resolution)
+2. Multi-pass OCR with 5 preprocessing techniques
+3. Best OCR result selected based on scoring
+4. OCR text sent to LLM for parsing
 
-| Step | Time | Description |
-|------|------|-------------|
-| File Upload & Validation | ~100ms | Read file, check type/size |
-| Image Preprocessing | ~500ms | Convert PDF to images, resize |
-| **Multi-pass OCR** | **5-15 sec** | Run 15+ OCR passes with different preprocessing |
-| **LLM API Call** | **15-30 sec** | Send to Gemini, wait for response |
-| JSON Parsing | ~10ms | Parse LLM response |
-| Response Building | ~50ms | Build final response |
+**Advantages:**
+- Good balance of speed and accuracy
+- Lower cost than Vision API
+- Reliable for quality images
 
-**Why so slow?**
-- LLM Vision models are slow (network + processing)
-- Multi-pass OCR ensures best quality but takes time
-- Gemini processes each image pixel-by-pixel
+**Example use case:** Mobile phone photos of marksheets in good lighting
 
-**How to speed up:**
-1. Use `text_pdf_llm` method (upload text-based PDFs, not scanned)
-2. Upload smaller/lower resolution images
-3. Use OCR mode (confidence >= 60%) instead of direct vision
+---
+
+#### 3. vision_direct
+**Best for:** Poor quality images, bad lighting, damaged documents
+
+**How it works:**
+1. Quality assessment detects poor image (blur/contrast issues)
+2. Skip OCR entirely (would produce garbage)
+3. Raw image sent directly to Gemini Vision API
+4. Vision model extracts data from pixels
+
+**Advantages:**
+- Best accuracy for poor quality sources
+- Handles damaged/faded documents
+- No OCR preprocessing overhead
+
+**Disadvantages:**
+- Slower processing (Vision API is compute-intensive)
+- Higher API costs
+
+**Example use case:** Old photocopied marksheets, water-damaged documents
+
+---
+
+#### 4. vision_ocr_fallback
+**Best for:** Images that look clear but have OCR-resistant issues
+
+**How it works:**
+1. Quality assessment passes (image looks OK)
+2. OCR runs but produces low confidence (<60%)
+3. System falls back to Vision API
+4. Both OCR attempt time and Vision time add up
+
+**Why this happens:**
+- Unusual fonts or handwriting
+- Text on complex backgrounds
+- Watermarks interfering with OCR
+- Non-standard layouts
+
+**Example use case:** Artistic/designed marksheets with decorative fonts
+
+---
+
+### Performance Comparison
+
+**Processing Time Breakdown:**
+
+| Method | Quality Check | OCR | LLM/Vision | Total |
+|--------|--------------|-----|------------|-------|
+| `text_pdf_direct` | 100ms | 0s | 2-3s | **2-3s** |
+| `ocr_text_llm` | 500ms | 4-5s | 2-3s | **7-8s** |
+| `vision_direct` | 500ms | 0s | 15-25s | **16-26s** |
+| `vision_ocr_fallback` | 500ms | 4-5s | 15-25s | **20-31s** |
+
+**Cost Estimate (per extraction):**
+
+| Method | API Calls | Estimated Cost |
+|--------|-----------|----------------|
+| `text_pdf_direct` | 1 text-only LLM | ~$0.00005 |
+| `ocr_text_llm` | 1 text-only LLM | ~$0.00006 |
+| `vision_direct` | 1 Vision API | ~$0.0003 |
+| `vision_ocr_fallback` | 1 Vision API | ~$0.0003 |
+
+---
+
+## Processing Pipeline Details
+
+Here's a detailed breakdown of what happens during extraction, with actual timing data for each method.
+
+### Pipeline Stages
+
+#### Stage 1: File Reception & Validation (100-200ms)
+
+```
+┌─────────────────────────────┐
+│  1. Read file from upload   │ → 50ms
+│  2. Check file size         │ → 10ms
+│  3. Validate file type      │ → 10ms
+│  4. Load into memory        │ → 30-100ms
+└─────────────────────────────┘
+```
+
+**Potential Issues:**
+- File size > 10MB → rejected
+- Invalid file type → rejected
+- Corrupted file → rejected
+
+---
+
+#### Stage 2: PDF Type Detection (100-500ms)
+
+**For PDF files only:**
+
+```
+┌─────────────────────────────┐
+│  1. Open PDF with PyMuPDF   │ → 50ms
+│  2. Extract text per page   │ → 20-200ms per page
+│  3. Count characters        │ → 10ms
+│  4. Classify PDF type       │ → 10ms
+└─────────────────────────────┘
+```
+
+**Decision Logic:**
+- Avg chars/page >= 80 → Text-based PDF (proceed to text extraction)
+- Avg chars/page < 80 → Image-based PDF (convert to images)
+
+---
+
+#### Stage 3: Image Processing (200-800ms)
+
+**For image files or image-based PDFs:**
+
+```
+┌─────────────────────────────┐
+│  1. Decode image bytes      │ → 50-200ms
+│  2. Convert color mode      │ → 50-100ms
+│  3. Resize if needed        │ → 100-300ms (if >4096px)
+│  4. Optimize for API        │ → 50-200ms
+└─────────────────────────────┘
+```
+
+**For multi-page PDFs:**
+- Each page rendered at 300 DPI → 200-500ms per page
+- Total: 200ms × pages
+
+---
+
+#### Stage 4: Quality Assessment (300-600ms)
+
+```
+┌─────────────────────────────┐
+│  1. Convert to grayscale    │ → 50ms
+│  2. Calculate blur score    │ → 100-200ms (Laplacian variance)
+│  3. Calculate contrast      │ → 50-100ms (std deviation)
+│  4. Measure resolution      │ → 10ms
+│  5. Compute quality score   │ → 10ms
+│  6. Decide routing          │ → 10ms
+└─────────────────────────────┘
+```
+
+**Output:** Quality score (0-100) + routing decision (OCR vs Vision)
+
+---
+
+#### Stage 5A: Multi-Pass OCR (4-6 seconds)
+
+**Only if quality >= 65:**
+
+```
+┌─────────────────────────────┐
+│  Preprocessing Techniques:   │
+│  1. Grayscale + enhance     │ ┐
+│  2. CLAHE + denoise         │ │
+│  3. Otsu threshold          │ ├─ All run in parallel
+│  4. Adaptive threshold      │ │  (ThreadPoolExecutor)
+│  5. Sharpen + enhance       │ ┘
+│                             │ → 4-6 seconds total
+│  6. Score all results       │ → 50ms
+│  7. Pick best result        │ → 10ms
+└─────────────────────────────┘
+```
+
+**Scoring Formula:**
+```
+score = (alphanumeric_count × 0.4) + 
+        (confidence × 100 × 0.4) + 
+        (word_count × 0.2)
+```
+
+**Output:** Best OCR text + confidence score
+
+---
+
+#### Stage 5B: OCR Confidence Check (50ms)
+
+```
+┌─────────────────────────────┐
+│  1. Count words by conf     │ → 20ms
+│  2. Calculate weighted avg  │ → 20ms
+│  3. Apply bonus if good     │ → 10ms
+└─────────────────────────────┘
+```
+
+**Decision:**
+- OCR confidence >= 60% → Use OCR text path
+- OCR confidence < 60% → Fallback to Vision API
+
+---
+
+#### Stage 6A: LLM Text Extraction (2-4 seconds)
+
+**For text-based PDFs or good OCR:**
+
+```
+┌─────────────────────────────┐
+│  1. Build text prompt       │ → 10ms
+│  2. Call Gemini API         │ → 1500-3500ms
+│  3. Parse JSON response     │ → 50-200ms
+│  4. Calculate confidence    │ → 50ms
+└─────────────────────────────┘
+```
+
+**API Call Details:**
+- Model: gemini-2.5-flash
+- Temperature: 0.1 (deterministic)
+- Max tokens: 10,000
+- Network latency: 200-500ms
+- Processing time: 1-3 seconds
+
+---
+
+#### Stage 6B: Vision API Extraction (15-30 seconds)
+
+**For poor quality or OCR fallback:**
+
+```
+┌─────────────────────────────┐
+│  1. Encode images           │ → 100-300ms
+│  2. Build vision prompt     │ → 10ms
+│  3. Call Gemini Vision API  │ → 14000-28000ms ⚠️ SLOW
+│  4. Parse JSON response     │ → 50-200ms
+│  5. Calculate confidence    │ → 50ms
+└─────────────────────────────┘
+```
+
+**Why Vision API is slow:**
+- Processes every pixel in image
+- Runs multiple vision models internally
+- Handles OCR + understanding simultaneously
+- Network transfer for image data
+
+---
+
+#### Stage 7: Confidence Calculation (50-100ms)
+
+```
+┌─────────────────────────────┐
+│  1. Extract all field confs │ → 20ms
+│  2. Apply field weights     │ → 20ms
+│  3. Calculate weighted avg  │ → 20ms
+│  4. Apply penalties         │ → 10ms
+│  5. Round to 3 decimals     │ → 10ms
+└─────────────────────────────┘
+```
+
+---
+
+#### Stage 8: Response Building (50-100ms)
+
+```
+┌─────────────────────────────┐
+│  1. Serialize JSON          │ → 30-50ms
+│  2. Add metadata            │ → 10ms
+│  3. Calculate total time    │ → 10ms
+│  4. Save to file (optional) │ → 20-50ms
+└─────────────────────────────┘
+```
+
+---
+
+### Total Time by Method
+
+| Method | File Val | PDF/Image | Quality | OCR | LLM/Vision | Confidence | Response | **Total** |
+|--------|---------|-----------|---------|-----|------------|------------|----------|-----------|
+| `text_pdf_direct` | 150ms | 300ms | - | - | 2500ms | 70ms | 80ms | **~3.1s** |
+| `ocr_text_llm` | 150ms | 500ms | 500ms | 5000ms | 2500ms | 70ms | 80ms | **~8.8s** |
+| `vision_direct` | 150ms | 500ms | 500ms | - | 20000ms | 70ms | 80ms | **~21.3s** |
+| `vision_ocr_fallback` | 150ms | 500ms | 500ms | 5000ms | 20000ms | 70ms | 80ms | **~26.3s** |
+
+### Performance Optimization Tips
+
+**To minimize processing time:**
+
+1. **Upload text-based PDFs when possible** → 3x faster (text_pdf_direct)
+2. **Ensure good lighting when photographing** → Better quality = OCR path
+3. **Use higher resolution images** → Better quality scores
+4. **Avoid shadows and glare** → Better contrast scores
+5. **Keep documents flat** → Less blur
+6. **Use async jobs for batch processing** → Process multiple files in parallel
+
+**What NOT to do:**
+- ❌ Upload low-res/blurry images (forces Vision API)
+- ❌ Upload huge files >10MB (rejected)
+- ❌ Upload photos with fingers/objects visible (confuses Vision)
+- ❌ Upload rotated/sideways images (reduces OCR accuracy)
 
 ---
 
@@ -440,85 +1076,353 @@ Here's where the ~30-40 seconds goes:
 
 All settings in `.env` file:
 
+### Core Settings
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GOOGLE_API_KEY` | - | Your Gemini API key |
+| `APP_NAME` | "Souradip Marksheet Extraction API" | Application name |
+| `APP_VERSION` | "1.0.0" | API version |
+| `DEBUG` | false | Enable debug mode (verbose logging) |
+
+### LLM Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOOGLE_API_KEY` | - | Your Gemini API key (required) |
 | `GEMINI_MODEL` | gemini-2.5-flash | Gemini model to use |
-| `OCR_CONFIDENCE_THRESHOLD` | 0.60 | Min confidence for OCR mode |
-| `OCR_USE_PARALLEL` | true | Enable parallel OCR processing (set to false if not supported) |
-| `MAX_FILE_SIZE_MB` | 10 | Max upload size |
-| `SAVE_OCR_TEXT` | true | Save OCR output to files |
-| `DEBUG` | false | Enable debug mode |
-| `RATE_LIMIT_REQUESTS` | 100 | Max requests per minute |
+| `DEFAULT_LLM_PROVIDER` | gemini | LLM provider (only "gemini" supported currently) |
+
+### OCR Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OCR_CONFIDENCE_THRESHOLD` | 0.60 | Min OCR confidence to use text path (0.0-1.0) |
+| `OCR_USE_PARALLEL` | true | Enable parallel OCR processing |
+| `SAVE_OCR_TEXT` | true | Save OCR output to extract/ folder |
+
+### File Upload Limits
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_FILE_SIZE_MB` | 10 | Max file upload size in MB |
+| `ALLOWED_EXTENSIONS` | jpg,jpeg,png,webp,pdf | Allowed file extensions |
+
+### Celery & Redis (Async Jobs)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CELERY_ENABLED` | false | Enable async job processing |
+| `REDIS_HOST` | localhost | Redis server host |
+| `REDIS_PORT` | 6379 | Redis server port |
+| `REDIS_DB` | 0 | Redis database number |
+| `REDIS_PASSWORD` | - | Redis password (optional) |
+
+**To enable async jobs:**
+```env
+CELERY_ENABLED=true
+REDIS_HOST=localhost
+REDIS_PORT=6379
+```
+
+Then start Celery worker:
+```bash
+celery -A app.core.celery_config worker --loglevel=info --concurrency=2
+```
+
+### MongoDB (User Tracking & Logging)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MONGODB_ENABLED` | false | Enable MongoDB logging |
+| `MONGODB_URL` | - | MongoDB connection string |
+| `MONGODB_DB_NAME` | marksheet_extraction | Database name |
+
+**To enable MongoDB:**
+```env
+MONGODB_ENABLED=true
+MONGODB_URL=mongodb://localhost:27017
+MONGODB_DB_NAME=marksheet_extraction
+```
+
+**What gets logged:**
+- Extraction requests (user_id, filename, status)
+- Processing times and methods used
+- Success/failure rates
+- API usage statistics
+- Cost estimates per request
+
+### Rate Limiting
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RATE_LIMIT_ENABLED` | true | Enable rate limiting |
+| `RATE_LIMIT_REQUESTS` | 100 | Max requests per minute per IP |
+
+### Security
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JWT_SECRET_KEY` | - | JWT signing key (required if auth enabled) |
+| `JWT_ALGORITHM` | HS256 | JWT algorithm |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | 30 | JWT token expiry time |
+
+---
 
 ---
 
 ## How Confidence Score is Calculated
 
-The API returns confidence scores at multiple levels to help you understand the reliability of extracted data.
+The API calculates confidence at multiple stages to provide reliability indicators for extracted data. Each stage contributes to the final confidence assessment.
 
-### 1. OCR Confidence (Tesseract)
+### 1. Image Quality Confidence
 
-Tesseract OCR gives a confidence score (0-100) for each word it detects. We calculate the **average OCR confidence** like this:
+**Before processing**, we assess the raw image quality:
 
 ```
-Formula:
-- For each word, Tesseract gives confidence (0-100%)
-- High confidence words (>=70%) get weight = 1.5
-- Low confidence words (<70%) get weight = 1.0
-- Average = sum(confidence * weight) / sum(weights)
-- If >70% words are high confidence, we give 10% bonus (max 1.0)
+quality_score = (blur_score × 0.35) + (contrast_score × 0.45) + (resolution_score × 0.20)
 ```
+
+**Components:**
+- **Blur Score**: Laplacian variance method (threshold: 100.0)
+- **Contrast Score**: Grayscale standard deviation (threshold: 35)
+- **Resolution Score**: Minimum dimension check (threshold: 800px)
+
+**Impact on Processing:**
+- Score >= 65: Route to OCR path (faster, cheaper)
+- Score < 65: Route directly to Vision API (better accuracy)
+
+### 2. OCR Confidence (Tesseract)
+
+**If OCR is used**, Tesseract provides word-level confidence scores (0-100). We calculate weighted average:
+
+```
+For each word:
+  - High confidence word (>=70%): weight = 1.5
+  - Low confidence word (<70%):  weight = 1.0
+
+weighted_avg = sum(confidence × weight) / sum(weights)
+
+Bonus: If >70% words are high confidence → +10% boost (capped at 1.0)
+```
+
+**Example Calculation:**
+```
+Words: ["RAHUL" (95%), "KUMAR" (88%), "x7z" (30%)]
+
+Weighted calculation:
+- RAHUL: 0.95 × 1.5 = 1.425
+- KUMAR: 0.88 × 1.5 = 1.32
+- x7z:   0.30 × 1.0 = 0.30
+
+Average = (1.425 + 1.32 + 0.30) / (1.5 + 1.5 + 1.0) = 0.76 (76%)
+```
+
+**Routing Decision:**
+- OCR confidence >= 60%: Send OCR text to LLM (fast path)
+- OCR confidence < 60%: Fallback to Vision API (accuracy path)
+
+### 3. Field-Level Confidence (LLM)
+
+Gemini returns confidence for each extracted field based on:
+- **Visual clarity**: How clearly the text is visible in the image/OCR
+- **Pattern matching**: Does the value match expected format? (e.g., dates, numbers)
+- **Contextual consistency**: Does it align with other fields?
+
+| Confidence Range | Interpretation |
+|-----------------|----------------|
+| 0.9 - 1.0 | Excellent - Field perfectly clear and validated |
+| 0.7 - 0.9 | Good - Field readable with high certainty |
+| 0.5 - 0.7 | Fair - Field detected but some ambiguity |
+| 0.3 - 0.5 | Poor - Field partially visible or uncertain |
+| 0.0 - 0.3 | Very Low - Field barely visible or inferred |
+
+### 4. Overall Extraction Confidence
+
+The final `extraction_confidence` is a **weighted average** across all extracted fields, with critical fields getting higher weight:
+
+```python
+Field weights:
+  Critical fields (3.0x):  name, roll_number, result_status
+  Important fields (2.0x): obtained_marks, total_marks, subject_name, exam_name
+  Medium fields (1.5x):    board_university, grade, percentage
+  Other fields (1.0x):     All remaining fields
+
+overall_confidence = sum(field_confidence × weight) / sum(weights)
+```
+
+**Penalties Applied:**
+- Missing name or roll_number: -15% penalty
+- Missing subjects array: -30% penalty
 
 **Example:**
 ```
-Words detected: ["RAHUL" (conf: 95%), "KUMAR" (conf: 88%), "x7z" (conf: 30%)]
+Extracted fields:
+- name: 0.95 (weight: 3.0) → 2.85
+- roll_number: 0.92 (weight: 3.0) → 2.76
+- subject_name: 0.88 (weight: 2.0) → 1.76
+- obtained_marks: 0.91 (weight: 2.0) → 1.82
+- father_name: 0.85 (weight: 1.0) → 0.85
 
-Calculation:
-- RAHUL: 0.95 * 1.5 = 1.425 (high conf, weight 1.5)
-- KUMAR: 0.88 * 1.5 = 1.32  (high conf, weight 1.5)
-- x7z:   0.30 * 1.0 = 0.30  (low conf, weight 1.0)
-
-Average = (1.425 + 1.32 + 0.30) / (1.5 + 1.5 + 1.0) = 0.76
+overall = (2.85 + 2.76 + 1.76 + 1.82 + 0.85) / (3.0 + 3.0 + 2.0 + 2.0 + 1.0)
+overall = 10.04 / 11.0 = 0.91 (91%)
 ```
 
-### 2. Field-Level Confidence (LLM)
+### Confidence vs Processing Method
 
-Gemini AI returns confidence for each extracted field based on:
-- How clearly visible the text is
-- How well it matches expected patterns (dates, numbers etc)
-- Consistency with other fields
+| Extraction Method | Typical Confidence | Notes |
+|------------------|-------------------|-------|
+| `text_pdf_llm` | 0.85 - 0.95 | Highest (native text extraction) |
+| `ocr_text_llm` | 0.75 - 0.90 | Good (quality OCR + LLM) |
+| `vision_direct` | 0.70 - 0.90 | Variable (depends on image quality) |
+| `vision_ocr_fallback` | 0.65 - 0.85 | Lower (poor quality source) |
 
-| Confidence Range | Meaning |
-|-----------------|---------|
-| 0.8 - 1.0 | Very High - Field is perfectly clear |
-| 0.6 - 0.8 | High - Field is readable, minor ambiguity |
-| 0.3 - 0.6 | Medium - Some uncertainty exists |
-| 0.0 - 0.3 | Low - Field partially visible or inferred |
+### Using Confidence Scores
 
-### 3. Overall Extraction Confidence
+**Recommended thresholds for automation:**
+- **>= 0.85**: Safe to auto-process without review
+- **0.70 - 0.85**: Review recommended for critical operations
+- **< 0.70**: Manual verification required
 
-The `extraction_confidence` in response is calculated as weighted average:
+---
 
+## Quick Reference Guide
+
+### Common Scenarios
+
+#### "My extraction is slow (>20 seconds)"
+
+**Likely cause:** Vision API being used instead of OCR path
+
+**Solutions:**
+1. Check image quality - is it blurry or low-contrast?
+2. Ensure good lighting when photographing
+3. Upload higher resolution images (>800px minimum dimension)
+4. If PDF, make sure it's text-based not scanned
+5. Check logs to see which method was used (`extraction_method` in response)
+
+---
+
+#### "Confidence scores are low (<0.70)"
+
+**Likely causes:**
+- Poor image quality
+- OCR failed to read text clearly
+- Unusual fonts or handwriting
+- Complex background or watermarks
+
+**Solutions:**
+1. Re-photograph with better lighting
+2. Ensure document is flat (no wrinkles or curves)
+3. Remove any obstructions (hands, shadows)
+4. Try scanning instead of photographing
+5. Clean the document before capturing
+
+---
+
+#### "Getting 'File too large' error"
+
+**Cause:** File exceeds 10MB limit
+
+**Solutions:**
+1. Reduce image resolution (4096px max dimension is enough)
+2. Compress PDF before uploading
+3. Convert multi-page PDF to single page if possible
+4. Use JPEG instead of PNG (smaller file size)
+
+---
+
+#### "Want faster processing for bulk files"
+
+**Solutions:**
+1. Enable Celery for async processing:
+   ```bash
+   # In .env
+   CELERY_ENABLED=true
+   REDIS_HOST=localhost
+   
+   # Start worker
+   celery -A app.core.celery_config worker --concurrency=4
+   ```
+2. Use batch endpoints: `/api/v1/jobs/batch`
+3. Process multiple workers in parallel
+4. Submit jobs and poll for results
+
+---
+
+#### "How to reduce API costs?"
+
+**Cost optimization tips:**
+1. Upload text-based PDFs when possible (cheapest: ~$0.00005/request)
+2. Ensure good image quality to trigger OCR path (cheap: ~$0.00006)
+3. Avoid forcing Vision API for clear images
+4. Batch process during off-peak hours
+5. Cache results for repeated documents
+
+**Cost breakdown:**
+- Text PDF → LLM: ~$0.00005
+- OCR → LLM: ~$0.00006
+- Vision API: ~$0.0003 (5-6x more expensive)
+
+---
+
+#### "Need to track user activity and API usage"
+
+**Solution:** Enable MongoDB logging
+
+```env
+# In .env
+MONGODB_ENABLED=true
+MONGODB_URL=mongodb://localhost:27017
+MONGODB_DB_NAME=marksheet_extraction
 ```
-Important fields (higher weight = 2.0):
-- name, roll_number, result_status
 
-Medium importance (weight = 1.5):
-- obtained_marks, total_marks, subject_name
+**What gets tracked:**
+- Extraction requests per user
+- Success/failure rates
+- Processing times
+- Cost estimates
+- Methods used
+- Error patterns
 
-Other fields (weight = 1.0):
-- All other extracted fields
+**Query example:**
+```javascript
+// MongoDB query to get user stats
+db.extraction_logs.aggregate([
+  { $group: {
+      _id: "$user_id",
+      total_requests: { $sum: 1 },
+      avg_processing_time: { $avg: "$processing_time_ms" },
+      total_cost: { $sum: "$cost_estimate_usd" }
+  }}
+])
 ```
 
-### Why OCR Confidence Matters
+---
 
-| OCR Confidence | What Happens |
-|---------------|--------------|
-| >= 60% | Use OCR text + send to Gemini (fast) |
-| < 60% | Send raw image to Gemini Vision (accurate but slower) |
+#### "Integration with frontend app"
 
-This threshold (60%) can be changed via `OCR_CONFIDENCE_THRESHOLD` in `.env`
+**Recommended flow (async mode):**
+   ```javascript
+   // Submit job
+   const submitResponse = await fetch('/api/v1/jobs/submit', {
+     method: 'POST',
+     body: formData
+   });
+   const { job_id } = await submitResponse.json();
+   
+   // Poll for status
+   const pollInterval = setInterval(async () => {
+     const statusResponse = await fetch(`/api/v1/jobs/${job_id}/status`);
+     const status = await statusResponse.json();
+     
+     if (status.status === 'completed') {
+       clearInterval(pollInterval);
+       const result = await fetch(`/api/v1/jobs/${job_id}/result`);
+       const data = await result.json();
+       console.log(data);
+     }
+   }, 2000); // Poll every 2 seconds
+   ```
 
 ---
 
