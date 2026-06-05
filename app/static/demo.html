@@ -105,6 +105,30 @@
             margin-bottom: 0.5rem;
         }
         
+        .scrollable-results {
+            max-height: 500px;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        
+        .scrollable-results::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .scrollable-results::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        
+        .scrollable-results::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        
+        .scrollable-results::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
         .tab-content > .tab-pane {
             padding: 1.5rem 0;
         }
@@ -295,9 +319,9 @@
                                 </div>
                                 
                                 <div class="d-grid gap-2">
-                                    <button class="btn btn-primary" onclick="extractSync()">
+                                    <!-- <button class="btn btn-primary" onclick="extractSync()">
                                         <i class="fas fa-bolt me-2"></i>Extract (Sync)
-                                    </button>
+                                    </button> -->
                                     <button class="btn btn-success" onclick="extractAsync()">
                                         <i class="fas fa-clock me-2"></i>Extract (Async)
                                     </button>
@@ -338,28 +362,22 @@
                             </h5>
                             <div id="userStats">
                                 <div class="row text-center">
-                                    <div class="col-6 mb-3">
+                                    <div class="col-4 mb-3">
                                         <div class="stat-card p-3 bg-light rounded">
                                             <h3 class="mb-0" id="totalExtractions">-</h3>
                                             <small class="text-muted">Total Extractions</small>
                                         </div>
                                     </div>
-                                    <div class="col-6 mb-3">
+                                    <div class="col-4 mb-3">
                                         <div class="stat-card p-3 bg-light rounded">
                                             <h3 class="mb-0" id="successRate">-</h3>
                                             <small class="text-muted">Success Rate</small>
                                         </div>
                                     </div>
-                                    <div class="col-6">
+                                    <div class="col-4 mb-3">
                                         <div class="stat-card p-3 bg-light rounded">
                                             <h3 class="mb-0" id="avgTime">-</h3>
                                             <small class="text-muted">Avg Time (ms)</small>
-                                        </div>
-                                    </div>
-                                    <div class="col-6">
-                                        <div class="stat-card p-3 bg-light rounded">
-                                            <h3 class="mb-0" id="totalCost">-</h3>
-                                            <small class="text-muted">Total Cost ($)</small>
                                         </div>
                                     </div>
                                 </div>
@@ -377,8 +395,10 @@
                                 <i class="fas fa-file-alt me-2"></i>Latest Result
                             </h5>
                         </div>
-                        <div class="card-body" id="resultContainer">
-                            <p class="text-muted text-center">No results yet</p>
+                        <div class="card-body p-0">
+                            <div class="scrollable-results p-3" id="resultContainer">
+                                <p class="text-muted text-center">No results yet</p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -557,7 +577,6 @@
                         : 0;
                     document.getElementById('successRate').textContent = successRate + '%';
                     document.getElementById('avgTime').textContent = (stats.avg_time || 0).toFixed(0);
-                    document.getElementById('totalCost').textContent = (stats.total_cost || 0).toFixed(5);
                 }
             } catch (error) {
                 console.error('Failed to load stats:', error);
@@ -889,8 +908,7 @@
                         ${getConfidenceBadge(extractedData.extraction_confidence)}
                     </div>
                     <small class="text-muted">
-                        Method: <strong>${data.extraction_method || 'N/A'}</strong> | 
-                        Cost: <strong>$${data.cost_estimate_usd || 0}</strong>
+                        Method: <strong>${data.extraction_method || 'N/A'}</strong>
                     </small>
                 </div>
             `;
@@ -1002,7 +1020,6 @@
             // Subjects
             if (extractedData.subjects && extractedData.subjects.length > 0) {
                 html += `<div class="mt-3"><strong><i class="fas fa-book me-2"></i>Subjects (${extractedData.subjects.length})</strong></div>`;
-                html += '<div style="max-height: 300px; overflow-y: auto;">';
                 
                 extractedData.subjects.forEach(subject => {
                     const name = subject.subject_name && subject.subject_name.value 
@@ -1028,8 +1045,6 @@
                         </div>
                     `;
                 });
-                
-                html += '</div>';
             }
             
             // Processing Notes
@@ -1064,6 +1079,87 @@
             URL.revokeObjectURL(url);
         }
 
+        function displayBatchResults(results) {
+            const container = document.getElementById('resultContainer');
+            
+            const successful = results.filter(r => r.success);
+            const failed = results.filter(r => !r.success);
+            
+            let html = `
+                <div class="mb-3">
+                    <h6 class="mb-3">Batch Processing Summary</h6>
+                    <div class="row text-center mb-3">
+                        <div class="col-6">
+                            <div class="p-2 bg-success bg-opacity-10 rounded">
+                                <h4 class="text-success mb-0">${successful.length}</h4>
+                                <small class="text-muted">Successful</small>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 bg-danger bg-opacity-10 rounded">
+                                <h4 class="text-danger mb-0">${failed.length}</h4>
+                                <small class="text-muted">Failed</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            if (successful.length > 0) {
+                html += `<div class="mt-3"><strong><i class="fas fa-check-circle text-success me-2"></i>Successful Extractions</strong></div>`;
+                
+                successful.forEach((result, index) => {
+                    const data = result.data || result;
+                    const candidate = data.candidate || {};
+                    const examination = data.examination || {};
+                    const resultInfo = data.result || {};
+                    
+                    const name = candidate.name?.value || 'Unknown';
+                    const rollNumber = candidate.roll_number?.value || 'N/A';
+                    const totalMarks = resultInfo.total_marks?.value;
+                    const percentage = resultInfo.percentage?.value;
+                    const status = resultInfo.result_status?.value;
+                    
+                    html += `
+                        <div class="result-field mb-3">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <div>
+                                    <strong class="d-block">${name}</strong>
+                                    <small class="text-muted">Roll: ${rollNumber}</small>
+                                </div>
+                                ${data.extraction_confidence ? getConfidenceBadge(data.extraction_confidence) : ''}
+                            </div>
+                            ${totalMarks !== null && totalMarks !== undefined ? `<div class="small">Marks: <strong>${totalMarks}</strong></div>` : ''}
+                            ${percentage !== null && percentage !== undefined ? `<div class="small">Percentage: <strong>${percentage}%</strong></div>` : ''}
+                            ${status ? `<div class="small">Status: <strong class="${status.toUpperCase() === 'PASS' ? 'text-success' : 'text-danger'}">${status}</strong></div>` : ''}
+                        </div>
+                    `;
+                });
+            }
+            
+            if (failed.length > 0) {
+                html += `<div class="mt-3"><strong><i class="fas fa-exclamation-circle text-danger me-2"></i>Failed Extractions</strong></div>`;
+                failed.forEach(result => {
+                    const error = result.error || 'Unknown error';
+                    html += `
+                        <div class="result-field bg-danger bg-opacity-10">
+                            <small class="text-danger">${error}</small>
+                        </div>
+                    `;
+                });
+            }
+            
+            html += `
+                <div class="mt-3 d-grid">
+                    <button class="btn btn-outline-primary btn-sm" onclick='downloadJSON(${JSON.stringify(results)})' >
+                        <i class="fas fa-download me-1"></i>Download Full Results
+                    </button>
+                </div>
+            `;
+            
+            container.innerHTML = html;
+        }
+        
         function getConfidenceBadge(confidence) {
             if (!confidence && confidence !== 0) return '';
             const value = (confidence * 100).toFixed(1);
@@ -1190,34 +1286,41 @@
                 if (response.ok) {
                     progressBar.style.width = '100%';
                     
-                    // Check if async (job-based) or sync (results-based)
                     if (data.jobs) {
-                        // Async - add all jobs
-                        progressText.textContent = `${data.total_files} jobs submitted!`;
+                        progressText.textContent = `${data.total_files} jobs submitted successfully`;
                         data.jobs.forEach(job => {
                             addJob(job.job_id, job.filename);
                             startJobPolling(job.job_id);
                         });
+                        setTimeout(() => {
+                            progressContainer.classList.remove('active');
+                            clearBatchFiles();
+                        }, 1500);
                     } else if (data.results) {
-                        // Sync - show results
-                        progressText.textContent = `Completed! ${data.successful}/${data.total_files} successful`;
+                        progressText.textContent = `Processing completed`;
                         
-                        // Display first successful result
-                        const firstSuccess = data.results.find(r => r.success);
-                        if (firstSuccess) {
-                            displayResult(firstSuccess);
+                        const successful = data.results.filter(r => r.success);
+                        const failed = data.results.filter(r => !r.success);
+                        
+                        if (successful.length > 0) {
+                            displayBatchResults(data.results);
+                            showMessage('authMessage', 'success', 
+                                `Batch completed: ${successful.length} successful${failed.length > 0 ? ', ' + failed.length + ' failed' : ''}`);
+                        } else {
+                            showMessage('authMessage', 'danger', 
+                                `All ${failed.length} files failed to process`);
                         }
                         
-                        // Show summary
-                        showMessage('authMessage', 'success', 
-                            `Batch completed: ${data.successful} successful, ${data.failed} failed`);
+                        setTimeout(() => {
+                            progressContainer.classList.remove('active');
+                            clearBatchFiles();
+                            loadUserStats();
+                        }, 1500);
                     }
                     
                     setTimeout(() => {
-                        progressContainer.classList.remove('active');
-                        clearBatchFiles();
                         loadUserStats();
-                    }, 1500);
+                    }, 2000);
                 } else {
                     throw new Error(data.detail || 'Batch extraction failed');
                 }
