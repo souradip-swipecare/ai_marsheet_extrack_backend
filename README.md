@@ -81,7 +81,7 @@ This API uses intelligent routing to extract structured data from marksheets wit
     │  Confidence      │
     │  Calculator      │
     │  - Field weights │
-    │  - Penalties     │
+    │  - Weighted avg  │
     └────────┬─────────┘
              │
              ▼
@@ -254,8 +254,9 @@ ai_marsheet_extrack_backend/
                 │   CONFIDENCE CALCULATION     │
                 │   • Field-level scores       │
                 │   • Weighted by importance   │
-                │   • Critical fields: 2-3x    │
-                │   • Regular fields: 1x       │
+                │   • Critical fields: 2.0x    │
+                │   • Important fields: 1.5x   │
+                │   • Other fields: 1.0x       │
                 └──────────────────────────────┘
                                │
                                ▼
@@ -692,6 +693,172 @@ GET /api/v1/health
 
 ---
 
+## Authentication (JWT)
+
+The API supports JWT (JSON Web Token) based authentication for secure access control. When MongoDB is enabled, all extraction endpoints require authentication.
+
+### Authentication Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  1. User Registration/Login                                      │
+│     POST /api/v1/auth/login                                      │
+│     Body: { "email": "user@example.com", "password": "pass123" } │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  2. Receive JWT Token                                            │
+│     Response: { "access_token": "eyJhbGci...", "token_type": ... }│
+└────────────────────────┬─────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  3. Use Token in API Requests                                    │
+│     Authorization: Bearer eyJhbGci...                            │
+│     (Include in header of every request)                         │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  4. Token Validation                                             │
+│     • Server validates signature                                 │
+│     • Checks expiration (default: 30 minutes)                    │
+│     • Extracts user_id from token                                │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  5. Process Request                                              │
+│     • Log activity with user_id                                  │
+│     • Execute extraction                                         │
+│     • Return results                                             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 1. User Registration
+
+```
+POST /api/v1/auth/register
+```
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "your_secure_password",
+  "full_name": "John Doe"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "User registered successfully",
+  "user": {
+    "user_id": "usr_1234567890abcdef",
+    "email": "user@example.com",
+    "full_name": "John Doe"
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "SecurePass123!",
+    "full_name": "John Doe"
+  }'
+```
+
+---
+
+### 2. User Login (Get JWT Token)
+
+```
+POST /api/v1/auth/login
+```
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "your_secure_password"
+}
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoidXNyXzEyMzQ1Njc4OTBhYmNkZWYiLCJleHAiOjE3MTc2MDAwMDB9.signature",
+  "token_type": "bearer",
+  "expires_in": 1800
+}
+```
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "SecurePass123!"
+  }'
+```
+
+**Save the token:**
+```bash
+# Store token in variable for reuse
+TOKEN=$(curl -s -X POST "http://localhost:8000/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"SecurePass123!"}' \
+  | jq -r '.access_token')
+
+echo $TOKEN
+```
+
+---
+
+### 3. Using JWT Token in API Requests
+
+**IMPORTANT:** JWT tokens are passed in the `Authorization` header, **NOT** in request body or query parameters.
+
+#### Format:
+```
+Authorization: Bearer <your_jwt_token>
+```
+
+#### Submit Job with JWT Authentication
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/jobs/submit" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -F "file=@marksheet.jpg"
+```
+
+#### Check Job Status with JWT
+
+```bash
+curl -X GET "http://localhost:8000/api/v1/jobs/{job_id}/status" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+#### Get Job Result with JWT
+
+```bash
+curl -X GET "http://localhost:8000/api/v1/jobs/{job_id}/result" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+---
+
+
 ## Running Tests
 
 ```bash
@@ -1023,11 +1190,16 @@ score = (alphanumeric_count × 0.4) +
 ┌─────────────────────────────┐
 │  1. Extract all field confs │ → 20ms
 │  2. Apply field weights     │ → 20ms
-│  3. Calculate weighted avg  │ → 20ms
-│  4. Apply penalties         │ → 10ms
-│  5. Round to 3 decimals     │ → 10ms
+│  3. Calculate weighted avg  │ → 30ms
+│  4. Round to 3 decimals     │ → 10ms
+│  5. Clamp to 0.0-1.0 range  │ → 10ms
 └─────────────────────────────┘
 ```
+
+**Field Weights Applied:**
+- Critical fields (name, roll_number, result_status): 2.0x
+- Important fields (marks, subject_name): 1.5x
+- Other fields: 1.0x
 
 ---
 
@@ -1242,30 +1414,35 @@ The final `extraction_confidence` is a **weighted average** across all extracted
 
 ```python
 Field weights:
-  Critical fields (3.0x):  name, roll_number, result_status
-  Important fields (2.0x): obtained_marks, total_marks, subject_name, exam_name
-  Medium fields (1.5x):    board_university, grade, percentage
-  Other fields (1.0x):     All remaining fields
+  Critical fields (2.0x):  name, roll_number, result_status
+  Important fields (1.5x): obtained_marks, total_marks, subject_name
+  Other fields (1.0x):     All remaining fields (board, grade, percentage, etc.)
 
 overall_confidence = sum(field_confidence × weight) / sum(weights)
 ```
 
-**Penalties Applied:**
-- Missing name or roll_number: -15% penalty
-- Missing subjects array: -30% penalty
+**Implementation Details:**
+- The algorithm **recursively traverses** all extracted fields
+- Each field with a `{"value": ..., "confidence": ...}` structure contributes to the score
+- Weights are applied based on field importance for marksheet validation
+- Final score is **rounded to 3 decimal places** and clamped between 0.0 - 1.0
 
 **Example:**
 ```
 Extracted fields:
-- name: 0.95 (weight: 3.0) → 2.85
-- roll_number: 0.92 (weight: 3.0) → 2.76
-- subject_name: 0.88 (weight: 2.0) → 1.76
-- obtained_marks: 0.91 (weight: 2.0) → 1.82
+- name: 0.95 (weight: 2.0) → 1.90
+- roll_number: 0.92 (weight: 2.0) → 1.84
+- result_status: 0.98 (weight: 2.0) → 1.96
+- obtained_marks: 0.91 (weight: 1.5) → 1.365
+- total_marks: 0.88 (weight: 1.5) → 1.32
+- subject_name: 0.90 (weight: 1.5) → 1.35
 - father_name: 0.85 (weight: 1.0) → 0.85
 
-overall = (2.85 + 2.76 + 1.76 + 1.82 + 0.85) / (3.0 + 3.0 + 2.0 + 2.0 + 1.0)
-overall = 10.04 / 11.0 = 0.91 (91%)
+overall = (1.90 + 1.84 + 1.96 + 1.365 + 1.32 + 1.35 + 0.85) / (2.0 + 2.0 + 2.0 + 1.5 + 1.5 + 1.5 + 1.0)
+overall = 10.585 / 11.5 = 0.920 (92%)
 ```
+
+**Note:** This calculation is performed by the `GeminiExtractor._calculate_confidence()` method in `app/services/extraction.py` during async processing.
 
 ### Confidence vs Processing Method
 
