@@ -191,16 +191,19 @@
                             <form id="loginForm" onsubmit="handleLogin(event)">
                                 <div class="mb-3">
                                     <label class="form-label">Email</label>
-                                    <input type="email" class="form-control" name="email" required 
+                                    <input type="email" class="form-control" name="email" id="loginEmail" required 
                                            placeholder="user@example.com">
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label">Password</label>
-                                    <input type="password" class="form-control" name="password" required 
+                                    <input type="password" class="form-control" name="password" id="loginPassword" required 
                                            placeholder="••••••••">
                                 </div>
                                 <button type="submit" class="btn btn-primary w-100">
                                     <i class="fas fa-sign-in-alt me-2"></i>Login
+                                </button>
+                                <button type="button" class="btn btn-outline-info w-100 mt-2" onclick="useDemoLogin()">
+                                    <i class="fas fa-user-check me-2"></i>Use Demo Login
                                 </button>
                             </form>
                         </div>
@@ -413,6 +416,7 @@
         let currentUser = null;
         let activeJobs = new Map();
         let selectedFile = null;
+        let batchResultsStorage = new Map(); // Store batch results for download
         const API_BASE = window.location.origin;
 
         // Initialize
@@ -605,16 +609,8 @@
         async function useSampleFile(e) {
             e.stopPropagation();
             
-            // Rotate through different sample files
-            const sampleFiles = [
-                { path: '/testdata/marks_sheet_1.webp', name: 'sample_marksheet_1.webp', type: 'image/webp' },
-                { path: '/testdata/marks_sheet_2.webp', name: 'sample_marksheet_2.webp', type: 'image/webp' },
-                { path: '/testdata/shashank.jpg', name: 'sample_marksheet_3.jpg', type: 'image/jpeg' }
-            ];
-            
-            // Use a random sample or rotate
-            const randomIndex = Math.floor(Math.random() * sampleFiles.length);
-            const sample = sampleFiles[randomIndex];
+            // Use marksheet.png as the sample file
+            const sample = { path: '/testdata/marksheet.png', name: 'marksheet.png', type: 'image/png' };
             
             try {
                 showMessage('authMessage', 'info', 'Loading sample marksheet...');
@@ -635,9 +631,9 @@
                 
                 showMessage('authMessage', 'success', 'Sample loaded! Starting extraction...');
                 
-                // Auto-trigger sync extraction after a short delay
+                // Auto-trigger async extraction after a short delay
                 setTimeout(() => {
-                    extractSync();
+                    extractAsync();
                 }, 800);
                 
             } catch (error) {
@@ -1082,12 +1078,19 @@
         function displayBatchResults(results) {
             const container = document.getElementById('resultContainer');
             
+            // Store results for download with unique ID
+            const resultId = Date.now();
+            batchResultsStorage.set(resultId, results);
+            
             const successful = results.filter(r => r.success);
             const failed = results.filter(r => !r.success);
             
             let html = `
                 <div class="mb-3">
-                    <h6 class="mb-3">Batch Processing Summary</h6>
+                    <div class="alert alert-info">
+                        <strong><i class="fas fa-layer-group me-2"></i>Batch Extraction Results</strong>
+                        <span class="badge bg-primary ms-2">${results.length} files</span>
+                    </div>
                     <div class="row text-center mb-3">
                         <div class="col-6">
                             <div class="p-2 bg-success bg-opacity-10 rounded">
@@ -1151,13 +1154,20 @@
             
             html += `
                 <div class="mt-3 d-grid">
-                    <button class="btn btn-outline-primary btn-sm" onclick='downloadJSON(${JSON.stringify(results)})' >
-                        <i class="fas fa-download me-1"></i>Download Full Results
+                    <button class="btn btn-outline-primary btn-sm" onclick="downloadBatchJSON(${resultId})">
+                        <i class="fas fa-download me-1"></i>Download Full Batch JSON
                     </button>
                 </div>
             `;
             
-            container.innerHTML = html;
+            // Instead of replacing, prepend the new batch results
+            const existingContent = container.innerHTML;
+            if (existingContent.includes('No results yet')) {
+                container.innerHTML = html;
+            } else {
+                // Add separator and prepend new results
+                container.innerHTML = html + '<hr class="my-4">' + existingContent;
+            }
         }
         
         function getConfidenceBadge(confidence) {
@@ -1168,6 +1178,29 @@
             else if (confidence >= 0.6) className = 'badge-medium';
             
             return `<span class="badge-confidence ${className}">${value}%</span>`;
+        }
+
+        function downloadBatchJSON(resultId) {
+            const results = batchResultsStorage.get(resultId);
+            if (!results) {
+                alert('Results not found');
+                return;
+            }
+            const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `batch_extraction_${resultId}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        function useDemoLogin() {
+            document.getElementById('loginEmail').value = 'test@gmail.com';
+            document.getElementById('loginPassword').value = 'test1234';
+            showMessage('authMessage', 'info', 'Demo credentials filled! Click Login to proceed.');
         }
 
         // Utility
